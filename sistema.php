@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.2.0
+ * Version: 2.2.1
  */
 
 declare(strict_types=1);
@@ -1072,11 +1072,13 @@ function handle_ajax(): void {
             "SELECT c.*, 
                    imei.meta_value AS imei,
                    serial.meta_value AS serial_number,
-                   prop.meta_value AS propriedade
+                   prop.meta_value AS propriedade,
+                   obs.meta_value AS observacao
             FROM {$tables->celulares} c
             LEFT JOIN {$tables->celulares_meta} imei ON imei.celular_id = c.id AND imei.meta_key = 'imei'
             LEFT JOIN {$tables->celulares_meta} serial ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
             LEFT JOIN {$tables->celulares_meta} prop ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+            LEFT JOIN {$tables->celulares_meta} obs ON obs.celular_id = c.id AND obs.meta_key = 'observacao'
             WHERE c.id = %d",
             $celular_id
         ), ARRAY_A);
@@ -1104,7 +1106,8 @@ function handle_ajax(): void {
             'status' => sanitize_text_field($input['status']),
             'imei' => $input['imei'] ?? '',
             'serial_number' => $input['serial_number'] ?? '',
-            'propriedade' => $input['propriedade'] ?? ''
+            'propriedade' => $input['propriedade'] ?? '',
+            'observacao' => $input['observacao'] ?? ''
         ];
         
         // Atualizar dados principais do celular
