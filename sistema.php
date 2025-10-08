@@ -1,15 +1,15 @@
 <?php
 /**
  * Arquivo único: /celulares-admin.php
- * Coloque na raiz do WordPress. Requer wp-load.php.
+ * Localização: /sistemas/celulares/sistema.php
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.1.0
+ * Version: 2.2.0
  */
 
 declare(strict_types=1);
 
 // --- Bootstrap WordPress ---
-require_once __DIR__ . '/wp-load.php';
+require_once __DIR__ . '/../../wp-load.php';
 
 /** @var wpdb $wpdb */
 global $wpdb;
