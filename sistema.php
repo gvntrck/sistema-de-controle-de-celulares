@@ -649,10 +649,33 @@ function registrar_transferencia(int $celular_id, ?int $colaborador_anterior, ?i
     }
     
     if ($colaborador_novo) {
-        $pdf_recebimento = gerar_pdf_html_recebimento(
-            $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tables->celulares} WHERE id = %d", $celular_id), ARRAY_A),
-            $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tables->colaboradores} WHERE id = %d", $colaborador_novo), ARRAY_A)
-        );
+        // Buscar dados completos do celular com metadados
+        $celular = $wpdb->get_row($wpdb->prepare("
+            SELECT c.*, 
+                   imei.meta_value AS imei,
+                   serial.meta_value AS serial_number,
+                   prop.meta_value AS propriedade
+            FROM {$tables->celulares} c
+            LEFT JOIN {$tables->celulares_meta} imei ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+            LEFT JOIN {$tables->celulares_meta} serial ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+            LEFT JOIN {$tables->celulares_meta} prop ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+            WHERE c.id = %d
+        ", $celular_id), ARRAY_A);
+        
+        // Buscar dados completos do colaborador com metadados
+        $colaborador = $wpdb->get_row($wpdb->prepare("
+            SELECT col.*,
+                   setor.meta_value AS setor,
+                   local.meta_value AS local
+            FROM {$tables->colaboradores} col
+            LEFT JOIN {$tables->colaboradores_meta} setor ON setor.colaborador_id = col.id AND setor.meta_key = 'setor'
+            LEFT JOIN {$tables->colaboradores_meta} local ON local.colaborador_id = col.id AND local.meta_key = 'local'
+            WHERE col.id = %d
+        ", $colaborador_novo), ARRAY_A);
+        
+        if ($celular && $colaborador) {
+            $pdf_recebimento = gerar_pdf_html_recebimento($celular, $colaborador);
+        }
     }
     
     // Inserir registro de transferência
