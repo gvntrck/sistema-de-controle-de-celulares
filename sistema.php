@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.5.0
+ * Version: 1.6.0
  */
 
 declare(strict_types=1);
@@ -169,6 +169,68 @@ function criar_colaborador(array $input): ?int {
     return $colaborador_id;
 }
 
+// --- Helper para salvar metas do celular ---
+function salvar_metas_celular(int $celular_id, array $input): void {
+    global $wpdb, $tables;
+    
+    $metas = [
+        'imei' => $input['imei'] ?? '',
+        'serial number' => $input['serial_number'] ?? '',
+        'data_aquisicao' => $input['data_aquisicao'] ?? '',
+        'data_entrega' => $input['data_entrega'] ?? '',
+        'observacao' => $input['observacao'] ?? ''
+    ];
+    
+    foreach ($metas as $key => $value) {
+        if (!empty($value)) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => $key,
+                'meta_value' => $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value)
+            ]);
+        }
+    }
+}
+
+// --- Helper para atualizar ou inserir metas do celular ---
+function upsert_metas_celular(int $celular_id, array $input): void {
+    global $wpdb, $tables;
+    
+    $metas = [
+        'imei' => $input['imei'] ?? '',
+        'serial number' => $input['serial_number'] ?? '',
+        'data_aquisicao' => $input['data_aquisicao'] ?? '',
+        'data_entrega' => $input['data_entrega'] ?? '',
+        'observacao' => $input['observacao'] ?? ''
+    ];
+    
+    foreach ($metas as $key => $value) {
+        if (!empty($value)) {
+            $exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$tables->celulares_meta} WHERE celular_id = %d AND meta_key = %s",
+                $celular_id,
+                $key
+            ));
+            
+            $sanitized_value = $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value);
+            
+            if ($exists) {
+                $wpdb->update(
+                    $tables->celulares_meta,
+                    ['meta_value' => $sanitized_value],
+                    ['celular_id' => $celular_id, 'meta_key' => $key]
+                );
+            } else {
+                $wpdb->insert($tables->celulares_meta, [
+                    'celular_id' => $celular_id,
+                    'meta_key' => $key,
+                    'meta_value' => $sanitized_value
+                ]);
+            }
+        }
+    }
+}
+
 // --- Handlers AJAX ---
 function handle_ajax(): void {
     global $wpdb, $tables;
@@ -216,41 +278,7 @@ function handle_ajax(): void {
         $celular_id = (int) $wpdb->insert_id;
         
         // Salvar metas do celular
-        if (!empty($input['imei'])) {
-            $wpdb->insert($tables->celulares_meta, [
-                'celular_id' => $celular_id,
-                'meta_key' => 'imei',
-                'meta_value' => sanitize_text_field($input['imei'])
-            ]);
-        }
-        if (!empty($input['serial_number'])) {
-            $wpdb->insert($tables->celulares_meta, [
-                'celular_id' => $celular_id,
-                'meta_key' => 'serial number',
-                'meta_value' => sanitize_text_field($input['serial_number'])
-            ]);
-        }
-        if (!empty($input['data_aquisicao'])) {
-            $wpdb->insert($tables->celulares_meta, [
-                'celular_id' => $celular_id,
-                'meta_key' => 'data_aquisicao',
-                'meta_value' => sanitize_text_field($input['data_aquisicao'])
-            ]);
-        }
-        if (!empty($input['data_entrega'])) {
-            $wpdb->insert($tables->celulares_meta, [
-                'celular_id' => $celular_id,
-                'meta_key' => 'data_entrega',
-                'meta_value' => sanitize_text_field($input['data_entrega'])
-            ]);
-        }
-        if (!empty($input['observacao'])) {
-            $wpdb->insert($tables->celulares_meta, [
-                'celular_id' => $celular_id,
-                'meta_key' => 'observacao',
-                'meta_value' => sanitize_textarea_field($input['observacao'])
-            ]);
-        }
+        salvar_metas_celular($celular_id, $input);
         
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
@@ -329,37 +357,7 @@ function handle_ajax(): void {
         );
         
         // Atualizar ou inserir metas
-        $metas = [
-            'imei' => $input['imei'] ?? '',
-            'serial number' => $input['serial_number'] ?? '',
-            'data_aquisicao' => $input['data_aquisicao'] ?? '',
-            'data_entrega' => $input['data_entrega'] ?? '',
-            'observacao' => $input['observacao'] ?? ''
-        ];
-        
-        foreach ($metas as $key => $value) {
-            if (!empty($value)) {
-                $exists = $wpdb->get_var($wpdb->prepare(
-                    "SELECT id FROM {$tables->celulares_meta} WHERE celular_id = %d AND meta_key = %s",
-                    $celular_id,
-                    $key
-                ));
-                
-                if ($exists) {
-                    $wpdb->update(
-                        $tables->celulares_meta,
-                        ['meta_value' => $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value)],
-                        ['celular_id' => $celular_id, 'meta_key' => $key]
-                    );
-                } else {
-                    $wpdb->insert($tables->celulares_meta, [
-                        'celular_id' => $celular_id,
-                        'meta_key' => $key,
-                        'meta_value' => $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value)
-                    ]);
-                }
-            }
-        }
+        upsert_metas_celular($celular_id, $input);
         
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
