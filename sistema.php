@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.3.0
+ * Version: 2.3.1
  */
 
 declare(strict_types=1);
@@ -2309,14 +2309,21 @@ $dashboard_stats = fetch_dashboard_stats();
                     }
                 });
             } else {
-                bootbox.alert('Erro ao salvar celular');
+                const mensagemErro = result.message || 'Erro ao salvar celular';
+                bootbox.alert({
+                    message: `<div class="alert alert-danger mb-0"><strong>Erro!</strong><br>${mensagemErro}</div>`,
+                    className: 'modal-danger'
+                });
                 btnSalvar.disabled = false;
                 btnSalvar.textContent = 'Salvar';
             }
         })
         .catch(err => {
             console.error('Erro:', err);
-            bootbox.alert('Erro ao salvar celular');
+            bootbox.alert({
+                message: '<div class="alert alert-danger mb-0"><strong>Erro!</strong><br>Erro ao salvar celular. Verifique o console para mais detalhes.</div>',
+                className: 'modal-danger'
+            });
             btnSalvar.disabled = false;
             btnSalvar.textContent = 'Salvar';
         });
@@ -2453,12 +2460,19 @@ document.addEventListener('click', function(e) {
                     const modal = new bootstrap.Modal(document.getElementById('modalAdicionarCelular'));
                     modal.show();
                 } else {
-                    bootbox.alert('Erro ao carregar dados do celular');
+                    const mensagemErro = result.message || 'Erro ao carregar dados do celular';
+                    bootbox.alert({
+                        message: `<div class="alert alert-danger mb-0"><strong>Erro!</strong><br>${mensagemErro}</div>`,
+                        className: 'modal-danger'
+                    });
                 }
             })
             .catch(err => {
                 console.error('Erro:', err);
-                bootbox.alert('Erro ao carregar dados do celular');
+                bootbox.alert({
+                    message: '<div class="alert alert-danger mb-0"><strong>Erro!</strong><br>Erro ao carregar dados do celular. Verifique o console para mais detalhes.</div>',
+                    className: 'modal-danger'
+                });
             });
     }
 });
