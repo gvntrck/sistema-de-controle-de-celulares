@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.4.1
+ * Version: 1.5.0
  */
 
 declare(strict_types=1);
@@ -133,6 +133,42 @@ function fetch_rows(): array {
     return $rows;
 }
 
+// --- Helper para cadastrar colaborador ---
+function criar_colaborador(array $input): ?int {
+    global $wpdb, $tables;
+    
+    if (empty($input['colaborador_nome']) || empty($input['colaborador_sobrenome']) || empty($input['colaborador_matricula'])) {
+        return null;
+    }
+    
+    $wpdb->insert($tables->colaboradores, [
+        'nome' => sanitize_text_field($input['colaborador_nome']),
+        'sobrenome' => sanitize_text_field($input['colaborador_sobrenome']),
+        'matricula' => sanitize_text_field($input['colaborador_matricula'])
+    ]);
+    
+    $colaborador_id = (int) $wpdb->insert_id;
+    
+    // Salvar metas do colaborador
+    if (!empty($input['colaborador_setor'])) {
+        $wpdb->insert($tables->colaboradores_meta, [
+            'colaborador_id' => $colaborador_id,
+            'meta_key' => 'setor',
+            'meta_value' => sanitize_text_field($input['colaborador_setor'])
+        ]);
+    }
+    
+    if (!empty($input['colaborador_local'])) {
+        $wpdb->insert($tables->colaboradores_meta, [
+            'colaborador_id' => $colaborador_id,
+            'meta_key' => 'local',
+            'meta_value' => sanitize_text_field($input['colaborador_local'])
+        ]);
+    }
+    
+    return $colaborador_id;
+}
+
 // --- Handlers AJAX ---
 function handle_ajax(): void {
     global $wpdb, $tables;
@@ -165,35 +201,10 @@ function handle_ajax(): void {
     if ($_GET['action'] === 'salvar_celular' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         
-        $colaborador_id = null;
-        
-        // Se for novo colaborador
-        if (!empty($input['novo_colaborador'])) {
-            $wpdb->insert($tables->colaboradores, [
-                'nome' => sanitize_text_field($input['colaborador_nome']),
-                'sobrenome' => sanitize_text_field($input['colaborador_sobrenome']),
-                'matricula' => sanitize_text_field($input['colaborador_matricula'])
-            ]);
-            $colaborador_id = (int) $wpdb->insert_id;
-            
-            // Salvar metas do colaborador
-            if (!empty($input['colaborador_setor'])) {
-                $wpdb->insert($tables->colaboradores_meta, [
-                    'colaborador_id' => $colaborador_id,
-                    'meta_key' => 'setor',
-                    'meta_value' => sanitize_text_field($input['colaborador_setor'])
-                ]);
-            }
-            if (!empty($input['colaborador_local'])) {
-                $wpdb->insert($tables->colaboradores_meta, [
-                    'colaborador_id' => $colaborador_id,
-                    'meta_key' => 'local',
-                    'meta_value' => sanitize_text_field($input['colaborador_local'])
-                ]);
-            }
-        } else {
-            $colaborador_id = !empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null;
-        }
+        // Determinar colaborador (novo ou existente)
+        $colaborador_id = !empty($input['novo_colaborador']) 
+            ? criar_colaborador($input) 
+            : (!empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null);
         
         // Inserir celular
         $wpdb->insert($tables->celulares, [
@@ -300,7 +311,10 @@ function handle_ajax(): void {
             exit;
         }
         
-        $colaborador_id = !empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null;
+        // Determinar colaborador (novo ou existente)
+        $colaborador_id = !empty($input['novo_colaborador']) 
+            ? criar_colaborador($input) 
+            : (!empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null);
         
         // Atualizar dados principais do celular
         $wpdb->update(
@@ -440,6 +454,8 @@ $data = fetch_rows();
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Bootstrap 5 via CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- jQuery (necessário para Bootbox.js) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <!-- Bootbox.js via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/bootbox@6.0.0/dist/bootbox.all.min.js"></script>
     <style>
