@@ -1,0 +1,110 @@
+Funcionalidades Críticas para Implementar
+1. Dashboard com Indicadores (KPIs)
+Total de celulares por status (disponível, emprestado, manutenção, defeito)
+Gráficos visuais (pizza/barras) mostrando distribuição
+Alertas de celulares em manutenção há muito tempo
+Valor total do inventário (se adicionar campo de valor)
+
+2. Sistema de Notificações e Alertas
+Alertas de vencimento: celulares emprestados há mais de X dias
+Notificações de manutenção: aparelhos que precisam revisão periódica
+Avisos de garantia: celulares próximos do fim da garantia
+E-mail automático para colaboradores quando recebem/devolvem aparelho
+
+3. Gestão de Acessórios
+Cadastro de acessórios vinculados ao celular (carregador, cabo, fone, capa)
+Controle de devolução de acessórios
+Checklist automático na transferência
+
+4. Relatórios e Exportação
+Relatório de inventário completo (Excel/PDF)
+Relatório por colaborador (histórico de aparelhos)
+Relatório por período (transferências, manutenções)
+Relatório de custos (se adicionar valores)
+Exportação CSV para análise externa
+
+5. Sistema de Manutenção
+Registro de manutenções (data, tipo, custo, responsável)
+Histórico de problemas por aparelho
+Controle de garantia e assistência técnica
+Status detalhado (em orçamento, aguardando peça, etc.)
+
+6. Controle de Garantia e Documentos
+Upload de nota fiscal do aparelho
+Data de compra e fim da garantia
+Documentos anexos (termos, contratos)
+Alertas de vencimento de garantia
+
+7. Gestão de Linhas/Chips
+Cadastro de linhas telefônicas (operadora, número, plano)
+Vinculação linha ↔ celular ↔ colaborador
+Controle de consumo e custos mensais
+Histórico de trocas de chip
+
+8. Sistema de Permissões (Roles)
+Admin: acesso total
+Gestor: visualiza e edita seu setor
+Colaborador: apenas visualiza seus aparelhos
+Auditoria: apenas leitura
+
+9. Auditoria e Logs
+Log de todas as ações (quem fez, quando, o quê)
+Histórico de alterações em cada registro
+Rastreabilidade completa para compliance
+
+10. Busca Avançada e Filtros
+Filtros múltiplos: por status, colaborador, setor, marca, período
+Busca por IMEI rápida
+Filtro por propriedade (Metalife/Selbetti)
+Ordenação personalizável
+
+11. Gestão de Devolução Definitiva
+Processo de baixa de aparelho (venda, descarte, doação)
+Motivo da baixa e documentação
+Termo de descarte ou venda
+
+12. Integração com API Externa
+Verificação de IMEI em base nacional (bloqueio/roubo)
+Consulta de preço de mercado do aparelho
+Integração com sistema de RH (importar colaboradores)
+
+13. Assinatura Digital
+Assinatura eletrônica nos termos de recebimento/devolução
+Validação jurídica dos documentos
+Armazenamento seguro das assinaturas
+
+14. Calendário de Manutenção Preventiva
+Agendamento automático de revisões
+Notificações preventivas
+Histórico de manutenções realizadas
+
+15. Controle de Custos
+Valor de aquisição do aparelho
+Custos de manutenção acumulados
+Depreciação calculada
+ROI por aparelho
+
+Priorização Sugerida (MVP+)
+
+Fase 1 - Essencial (Implementar primeiro)
+Dashboard com KPIs
+Relatórios e Exportação (Excel/PDF)
+Sistema de Manutenção
+Busca Avançada e Filtros
+
+Fase 2 - Importante (Curto prazo)
+Gestão de Acessórios
+Controle de Garantia e Documentos
+Sistema de Notificações
+Auditoria e Logs
+
+Fase 3 - Desejável (Médio prazo)
+Gestão de Linhas/Chips
+Sistema de Permissões
+Gestão de Devolução Definitiva
+Calendário de Manutenção Preventiva
+
+Fase 4 - Avançado (Longo prazo)
+Assinatura Digital
+Integração com API Externa
+Controle de Custos Detalhado
