@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.2.2
+ * Version: 2.3.0
  */
 
 declare(strict_types=1);
@@ -398,20 +398,47 @@ function fetch_rows(): array {
 }
 
 // --- Helper para cadastrar colaborador ---
-function criar_colaborador(array $input): ?int {
+function criar_colaborador(array $input): array {
     global $wpdb, $tables;
     
+    // Validação de campos obrigatórios
     if (empty($input['colaborador_nome']) || empty($input['colaborador_sobrenome']) || empty($input['colaborador_matricula'])) {
-        return null;
+        return ['success' => false, 'error' => 'Todos os campos obrigatórios devem ser preenchidos'];
+    }
+    
+    $matricula = sanitize_text_field($input['colaborador_matricula']);
+    
+    // Verificar se a matrícula já existe
+    $matricula_existente = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM {$tables->colaboradores} WHERE matricula = %s",
+        $matricula
+    ));
+    
+    if ($matricula_existente) {
+        return [
+            'success' => false, 
+            'error' => 'Matrícula já cadastrada',
+            'message' => "A matrícula '{$matricula}' já está em uso por outro colaborador"
+        ];
     }
     
     $dados_colaborador = [
         'nome' => sanitize_text_field($input['colaborador_nome']),
         'sobrenome' => sanitize_text_field($input['colaborador_sobrenome']),
-        'matricula' => sanitize_text_field($input['colaborador_matricula'])
+        'matricula' => $matricula
     ];
     
-    $wpdb->insert($tables->colaboradores, $dados_colaborador);
+    // Tentar inserir no banco
+    $resultado = $wpdb->insert($tables->colaboradores, $dados_colaborador);
+    
+    // Verificar se a inserção teve sucesso
+    if ($resultado === false || $wpdb->insert_id === 0) {
+        return [
+            'success' => false, 
+            'error' => 'Erro ao cadastrar colaborador',
+            'message' => 'Não foi possível criar o colaborador. ' . ($wpdb->last_error ?: 'Erro desconhecido')
+        ];
+    }
     
     $colaborador_id = (int) $wpdb->insert_id;
     
@@ -437,7 +464,7 @@ function criar_colaborador(array $input): ?int {
     // Registrar auditoria
     registrar_auditoria('criar', 'colaboradores', $colaborador_id, null, $dados_colaborador);
     
-    return $colaborador_id;
+    return ['success' => true, 'colaborador_id' => $colaborador_id];
 }
 
 // --- Helper para salvar metas do celular ---
@@ -974,9 +1001,23 @@ function handle_ajax(): void {
         $input = json_decode(file_get_contents('php://input'), true);
         
         // Determinar colaborador (novo ou existente)
-        $colaborador_id = !empty($input['novo_colaborador']) 
-            ? criar_colaborador($input) 
-            : (!empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null);
+        $colaborador_id = null;
+        
+        if (!empty($input['novo_colaborador'])) {
+            $resultado_colab = criar_colaborador($input);
+            
+            if (!$resultado_colab['success']) {
+                echo json_encode([
+                    'success' => false, 
+                    'message' => $resultado_colab['message'] ?? $resultado_colab['error']
+                ]);
+                exit;
+            }
+            
+            $colaborador_id = $resultado_colab['colaborador_id'];
+        } elseif (!empty($input['colaborador_id'])) {
+            $colaborador_id = (int) $input['colaborador_id'];
+        }
         
         // Preparar dados do celular
         $dados_celular = [
@@ -1089,12 +1130,22 @@ function handle_ajax(): void {
         // Se novo_colaborador está marcado, criar novo
         // Se colaborador_id está presente e não vazio, usar ele
         // Caso contrário, null (sem colaborador - devolução)
+        $colaborador_id = null;
+        
         if (!empty($input['novo_colaborador'])) {
-            $colaborador_id = criar_colaborador($input);
+            $resultado_colab = criar_colaborador($input);
+            
+            if (!$resultado_colab['success']) {
+                echo json_encode([
+                    'success' => false, 
+                    'message' => $resultado_colab['message'] ?? $resultado_colab['error']
+                ]);
+                exit;
+            }
+            
+            $colaborador_id = $resultado_colab['colaborador_id'];
         } elseif (isset($input['colaborador_id']) && $input['colaborador_id'] !== '' && $input['colaborador_id'] !== null) {
             $colaborador_id = (int) $input['colaborador_id'];
-        } else {
-            $colaborador_id = null;
         }
         
         // Preparar dados novos
@@ -1222,6 +1273,32 @@ function handle_ajax(): void {
                 'success' => true, 
                 'disponivel' => false,
                 'celular' => $resultado
+            ]);
+        } else {
+            echo json_encode(['success' => true, 'disponivel' => true]);
+        }
+        exit;
+    }
+    
+    // Verificar matrícula duplicada
+    if ($_GET['action'] === 'verificar_matricula') {
+        $matricula = isset($_GET['matricula']) ? sanitize_text_field($_GET['matricula']) : '';
+        
+        if (empty($matricula)) {
+            echo json_encode(['success' => true, 'disponivel' => true]);
+            exit;
+        }
+        
+        $colaborador_existente = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, nome, sobrenome, matricula FROM {$tables->colaboradores} WHERE matricula = %s",
+            $matricula
+        ), ARRAY_A);
+        
+        if ($colaborador_existente) {
+            echo json_encode([
+                'success' => true, 
+                'disponivel' => false,
+                'colaborador' => $colaborador_existente
             ]);
         } else {
             echo json_encode(['success' => true, 'disponivel' => true]);
