@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.7.0
+ * Version: 1.8.0
  */
 
 declare(strict_types=1);
@@ -21,6 +21,7 @@ $tables = (object) [
     'celulares_meta'     => $prefix . 'celulares_meta',
     'colaboradores'      => $prefix . 'colaboradores',
     'colaboradores_meta' => $prefix . 'colaboradores_meta',
+    'transferencias'     => $prefix . 'celulares_transferencias',
 ];
 
 // --- Helpers mínimos ---
@@ -82,6 +83,26 @@ function ensure_schema(): void {
         KEY idx_key (meta_key),
         CONSTRAINT fk_cel_meta FOREIGN KEY (celular_id)
             REFERENCES {$tables->celulares}(id) ON DELETE CASCADE
+    ) " . collate() . ";";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->transferencias} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        celular_id BIGINT UNSIGNED NOT NULL,
+        colaborador_anterior BIGINT UNSIGNED NULL,
+        colaborador_novo BIGINT UNSIGNED NULL,
+        data_transferencia DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        observacao TEXT NULL,
+        pdf_recebimento VARCHAR(255) NULL,
+        pdf_devolucao VARCHAR(255) NULL,
+        PRIMARY KEY (id),
+        KEY idx_celular (celular_id),
+        KEY idx_data (data_transferencia),
+        CONSTRAINT fk_transf_cel FOREIGN KEY (celular_id)
+            REFERENCES {$tables->celulares}(id) ON DELETE CASCADE,
+        CONSTRAINT fk_transf_colab_ant FOREIGN KEY (colaborador_anterior)
+            REFERENCES {$tables->colaboradores}(id) ON DELETE SET NULL,
+        CONSTRAINT fk_transf_colab_novo FOREIGN KEY (colaborador_novo)
+            REFERENCES {$tables->colaboradores}(id) ON DELETE SET NULL
     ) " . collate() . ";";
 
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -235,6 +256,418 @@ function upsert_metas_celular(int $celular_id, array $input): void {
     }
 }
 
+/**
+ * Gera PDF de ficha de recebimento de celular
+ */
+function gerar_pdf_recebimento(int $celular_id, int $colaborador_id): ?string {
+    global $wpdb, $tables;
+    
+    // Buscar dados do celular
+    $celular = $wpdb->get_row($wpdb->prepare("
+        SELECT c.*, 
+               imei.meta_value AS imei,
+               serial.meta_value AS serial_number,
+               prop.meta_value AS propriedade
+        FROM {$tables->celulares} c
+        LEFT JOIN {$tables->celulares_meta} imei ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+        LEFT JOIN {$tables->celulares_meta} serial ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+        LEFT JOIN {$tables->celulares_meta} prop ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+        WHERE c.id = %d
+    ", $celular_id), ARRAY_A);
+    
+    if (!$celular) {
+        return null;
+    }
+    
+    // Buscar dados do colaborador
+    $colaborador = $wpdb->get_row($wpdb->prepare("
+        SELECT col.*,
+               setor.meta_value AS setor,
+               local.meta_value AS local
+        FROM {$tables->colaboradores} col
+        LEFT JOIN {$tables->colaboradores_meta} setor ON setor.colaborador_id = col.id AND setor.meta_key = 'setor'
+        LEFT JOIN {$tables->colaboradores_meta} local ON local.colaborador_id = col.id AND local.meta_key = 'local'
+        WHERE col.id = %d
+    ", $colaborador_id), ARRAY_A);
+    
+    if (!$colaborador) {
+        return null;
+    }
+    
+    // Carregar TCPDF
+    require_once ABSPATH . 'wp-includes/class-phpass.php';
+    require_once ABSPATH . 'wp-includes/class-phpmailer.php';
+    
+    // Verificar se TCPDF está disponível no WordPress
+    if (!class_exists('TCPDF')) {
+        // Usar biblioteca alternativa ou HTML simples
+        return gerar_pdf_html_recebimento($celular, $colaborador);
+    }
+    
+    $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+    $pdf->SetCreator('Sistema de Controle de Celulares');
+    $pdf->SetAuthor('Metalife');
+    $pdf->SetTitle('Ficha de Recebimento de Celular');
+    
+    $pdf->setPrintHeader(false);
+    $pdf->setPrintFooter(false);
+    $pdf->SetMargins(15, 15, 15);
+    $pdf->SetAutoPageBreak(true, 15);
+    
+    $pdf->AddPage();
+    $pdf->SetFont('helvetica', '', 10);
+    
+    $data_atual = date('d/m/Y H:i');
+    
+    $html = "
+    <h1 style=\"text-align:center; color:#333;\">FICHA DE RECEBIMENTO DE CELULAR</h1>
+    <p style=\"text-align:center; font-size:10px; color:#666;\">Data: {$data_atual}</p>
+    <hr>
+    
+    <h3 style=\"color:#0066cc;\">Dados do Aparelho</h3>
+    <table cellpadding=\"5\" style=\"width:100%; border:1px solid #ccc;\">
+        <tr>
+            <td style=\"width:30%; background-color:#f5f5f5;\"><strong>Marca:</strong></td>
+            <td style=\"width:70%;\">{$celular['marca']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Modelo:</strong></td>
+            <td>{$celular['modelo']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>IMEI:</strong></td>
+            <td>{$celular['imei']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Serial Number:</strong></td>
+            <td>{$celular['serial_number']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Propriedade:</strong></td>
+            <td>{$celular['propriedade']}</td>
+        </tr>
+    </table>
+    
+    <br><br>
+    <h3 style=\"color:#0066cc;\">Dados do Colaborador</h3>
+    <table cellpadding=\"5\" style=\"width:100%; border:1px solid #ccc;\">
+        <tr>
+            <td style=\"width:30%; background-color:#f5f5f5;\"><strong>Nome:</strong></td>
+            <td style=\"width:70%;\">{$colaborador['nome']} {$colaborador['sobrenome']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Matrícula:</strong></td>
+            <td>{$colaborador['matricula']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Setor:</strong></td>
+            <td>{$colaborador['setor']}</td>
+        </tr>
+        <tr>
+            <td style=\"background-color:#f5f5f5;\"><strong>Local:</strong></td>
+            <td>{$colaborador['local']}</td>
+        </tr>
+    </table>
+    
+    <br><br>
+    <h3 style=\"color:#0066cc;\">Termo de Responsabilidade</h3>
+    <p style=\"text-align:justify; line-height:1.6;\">
+        Declaro que recebi o aparelho celular descrito acima em perfeitas condições de uso e funcionamento.
+        Comprometo-me a utilizar o equipamento exclusivamente para fins profissionais e a zelar pela sua
+        conservação e segurança. Estou ciente de que sou responsável pelo aparelho e que, em caso de perda,
+        roubo ou dano, devo comunicar imediatamente ao setor responsável.
+    </p>
+    
+    <br><br><br>
+    <table style=\"width:100%;\">
+        <tr>
+            <td style=\"width:50%; text-align:center; border-top:1px solid #000;\">
+                <br>Assinatura do Colaborador
+            </td>
+            <td style=\"width:50%; text-align:center; border-top:1px solid #000;\">
+                <br>Assinatura do Responsável
+            </td>
+        </tr>
+    </table>
+    ";
+    
+    $pdf->writeHTML($html, true, false, true, false, '');
+    
+    // Salvar PDF
+    $upload_dir = wp_upload_dir();
+    $pdf_dir = $upload_dir['basedir'] . '/celulares-pdfs/';
+    
+    if (!file_exists($pdf_dir)) {
+        wp_mkdir_p($pdf_dir);
+    }
+    
+    $filename = 'recebimento_' . $celular_id . '_' . $colaborador_id . '_' . time() . '.pdf';
+    $filepath = $pdf_dir . $filename;
+    
+    $pdf->Output($filepath, 'F');
+    
+    return $upload_dir['baseurl'] . '/celulares-pdfs/' . $filename;
+}
+
+/**
+ * Gera PDF de ficha de devolução de celular (versão HTML simples)
+ */
+function gerar_pdf_html_recebimento(array $celular, array $colaborador): string {
+    $upload_dir = wp_upload_dir();
+    $pdf_dir = $upload_dir['basedir'] . '/celulares-pdfs/';
+    
+    if (!file_exists($pdf_dir)) {
+        wp_mkdir_p($pdf_dir);
+    }
+    
+    $data_atual = date('d/m/Y H:i');
+    
+    $html = "<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>Ficha de Recebimento</title>
+    <link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css' rel='stylesheet'>
+    <style>
+        body { padding: 40px; font-family: Arial, sans-serif; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 30px; }
+        .signature-box { border-top: 1px solid #000; margin-top: 100px; padding-top: 10px; text-align: center; }
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class='no-print text-end mb-3'>
+        <button class='btn btn-primary' onclick='window.print()'>Imprimir</button>
+    </div>
+    
+    <div class='header'>
+        <h1>FICHA DE RECEBIMENTO DE CELULAR</h1>
+        <p class='text-muted'>Data: {$data_atual}</p>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Dados do Aparelho</h3>
+        <table class='table table-bordered'>
+            <tr><td class='bg-light' width='30%'><strong>Marca:</strong></td><td>{$celular['marca']}</td></tr>
+            <tr><td class='bg-light'><strong>Modelo:</strong></td><td>{$celular['modelo']}</td></tr>
+            <tr><td class='bg-light'><strong>IMEI:</strong></td><td>{$celular['imei']}</td></tr>
+            <tr><td class='bg-light'><strong>Serial Number:</strong></td><td>{$celular['serial_number']}</td></tr>
+            <tr><td class='bg-light'><strong>Propriedade:</strong></td><td>{$celular['propriedade']}</td></tr>
+        </table>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Dados do Colaborador</h3>
+        <table class='table table-bordered'>
+            <tr><td class='bg-light' width='30%'><strong>Nome:</strong></td><td>{$colaborador['nome']} {$colaborador['sobrenome']}</td></tr>
+            <tr><td class='bg-light'><strong>Matrícula:</strong></td><td>{$colaborador['matricula']}</td></tr>
+            <tr><td class='bg-light'><strong>Setor:</strong></td><td>{$colaborador['setor']}</td></tr>
+            <tr><td class='bg-light'><strong>Local:</strong></td><td>{$colaborador['local']}</td></tr>
+        </table>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Termo de Responsabilidade</h3>
+        <p style='text-align:justify; line-height:1.8;'>
+            Declaro que recebi o aparelho celular descrito acima em perfeitas condições de uso e funcionamento.
+            Comprometo-me a utilizar o equipamento exclusivamente para fins profissionais e a zelar pela sua
+            conservação e segurança. Estou ciente de que sou responsável pelo aparelho e que, em caso de perda,
+            roubo ou dano, devo comunicar imediatamente ao setor responsável.
+        </p>
+    </div>
+    
+    <div class='row mt-5'>
+        <div class='col-6'>
+            <div class='signature-box'>Assinatura do Colaborador</div>
+        </div>
+        <div class='col-6'>
+            <div class='signature-box'>Assinatura do Responsável</div>
+        </div>
+    </div>
+</body>
+</html>";
+    
+    $filename = 'recebimento_' . $celular['id'] . '_' . $colaborador['id'] . '_' . time() . '.html';
+    $filepath = $pdf_dir . $filename;
+    
+    file_put_contents($filepath, $html);
+    
+    return $upload_dir['baseurl'] . '/celulares-pdfs/' . $filename;
+}
+
+/**
+ * Gera PDF de ficha de devolução de celular
+ */
+function gerar_pdf_devolucao(int $celular_id, int $colaborador_id): ?string {
+    global $wpdb, $tables;
+    
+    // Buscar dados do celular
+    $celular = $wpdb->get_row($wpdb->prepare("
+        SELECT c.*, 
+               imei.meta_value AS imei,
+               serial.meta_value AS serial_number,
+               prop.meta_value AS propriedade
+        FROM {$tables->celulares} c
+        LEFT JOIN {$tables->celulares_meta} imei ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+        LEFT JOIN {$tables->celulares_meta} serial ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+        LEFT JOIN {$tables->celulares_meta} prop ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+        WHERE c.id = %d
+    ", $celular_id), ARRAY_A);
+    
+    if (!$celular) {
+        return null;
+    }
+    
+    // Buscar dados do colaborador
+    $colaborador = $wpdb->get_row($wpdb->prepare("
+        SELECT col.*,
+               setor.meta_value AS setor,
+               local.meta_value AS local
+        FROM {$tables->colaboradores} col
+        LEFT JOIN {$tables->colaboradores_meta} setor ON setor.colaborador_id = col.id AND setor.meta_key = 'setor'
+        LEFT JOIN {$tables->colaboradores_meta} local ON local.colaborador_id = col.id AND local.meta_key = 'local'
+        WHERE col.id = %d
+    ", $colaborador_id), ARRAY_A);
+    
+    if (!$colaborador) {
+        return null;
+    }
+    
+    $upload_dir = wp_upload_dir();
+    $pdf_dir = $upload_dir['basedir'] . '/celulares-pdfs/';
+    
+    if (!file_exists($pdf_dir)) {
+        wp_mkdir_p($pdf_dir);
+    }
+    
+    $data_atual = date('d/m/Y H:i');
+    
+    $html = "<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>Ficha de Devolução</title>
+    <link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css' rel='stylesheet'>
+    <style>
+        body { padding: 40px; font-family: Arial, sans-serif; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .section { margin-bottom: 30px; }
+        .signature-box { border-top: 1px solid #000; margin-top: 100px; padding-top: 10px; text-align: center; }
+        .checklist { list-style: none; padding-left: 0; }
+        .checklist li { margin-bottom: 10px; }
+        .checklist input[type='checkbox'] { margin-right: 10px; }
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class='no-print text-end mb-3'>
+        <button class='btn btn-primary' onclick='window.print()'>Imprimir</button>
+    </div>
+    
+    <div class='header'>
+        <h1>FICHA DE DEVOLUÇÃO DE CELULAR</h1>
+        <p class='text-muted'>Data: {$data_atual}</p>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Dados do Aparelho</h3>
+        <table class='table table-bordered'>
+            <tr><td class='bg-light' width='30%'><strong>Marca:</strong></td><td>{$celular['marca']}</td></tr>
+            <tr><td class='bg-light'><strong>Modelo:</strong></td><td>{$celular['modelo']}</td></tr>
+            <tr><td class='bg-light'><strong>IMEI:</strong></td><td>{$celular['imei']}</td></tr>
+            <tr><td class='bg-light'><strong>Serial Number:</strong></td><td>{$celular['serial_number']}</td></tr>
+            <tr><td class='bg-light'><strong>Propriedade:</strong></td><td>{$celular['propriedade']}</td></tr>
+        </table>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Dados do Colaborador</h3>
+        <table class='table table-bordered'>
+            <tr><td class='bg-light' width='30%'><strong>Nome:</strong></td><td>{$colaborador['nome']} {$colaborador['sobrenome']}</td></tr>
+            <tr><td class='bg-light'><strong>Matrícula:</strong></td><td>{$colaborador['matricula']}</td></tr>
+            <tr><td class='bg-light'><strong>Setor:</strong></td><td>{$colaborador['setor']}</td></tr>
+            <tr><td class='bg-light'><strong>Local:</strong></td><td>{$colaborador['local']}</td></tr>
+        </table>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Checklist de Devolução</h3>
+        <ul class='checklist'>
+            <li><input type='checkbox'> Aparelho em boas condições físicas (sem trincas, arranhões graves)</li>
+            <li><input type='checkbox'> Tela funcionando perfeitamente</li>
+            <li><input type='checkbox'> Bateria com boa autonomia</li>
+            <li><input type='checkbox'> Carregador devolvido</li>
+            <li><input type='checkbox'> Cabo USB devolvido</li>
+            <li><input type='checkbox'> Capa/proteção devolvida (se aplicável)</li>
+            <li><input type='checkbox'> Dados pessoais removidos (factory reset)</li>
+        </ul>
+    </div>
+    
+    <div class='section'>
+        <h3 class='text-primary'>Observações</h3>
+        <div style='border: 1px solid #ccc; min-height: 100px; padding: 10px;'>
+            <p class='text-muted'>Descreva aqui qualquer observação sobre o estado do aparelho:</p>
+        </div>
+    </div>
+    
+    <div class='row mt-5'>
+        <div class='col-6'>
+            <div class='signature-box'>Assinatura do Colaborador</div>
+        </div>
+        <div class='col-6'>
+            <div class='signature-box'>Assinatura do Responsável</div>
+        </div>
+    </div>
+</body>
+</html>";
+    
+    $filename = 'devolucao_' . $celular['id'] . '_' . $colaborador['id'] . '_' . time() . '.html';
+    $filepath = $pdf_dir . $filename;
+    
+    file_put_contents($filepath, $html);
+    
+    return $upload_dir['baseurl'] . '/celulares-pdfs/' . $filename;
+}
+
+/**
+ * Registra transferência de celular e gera PDFs
+ */
+function registrar_transferencia(int $celular_id, ?int $colaborador_anterior, ?int $colaborador_novo): ?int {
+    global $wpdb, $tables;
+    
+    // Gerar PDFs
+    $pdf_devolucao = null;
+    $pdf_recebimento = null;
+    
+    if ($colaborador_anterior) {
+        $pdf_devolucao = gerar_pdf_devolucao($celular_id, $colaborador_anterior);
+    }
+    
+    if ($colaborador_novo) {
+        $pdf_recebimento = gerar_pdf_html_recebimento(
+            $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tables->celulares} WHERE id = %d", $celular_id), ARRAY_A),
+            $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tables->colaboradores} WHERE id = %d", $colaborador_novo), ARRAY_A)
+        );
+    }
+    
+    // Inserir registro de transferência
+    $wpdb->insert($tables->transferencias, [
+        'celular_id' => $celular_id,
+        'colaborador_anterior' => $colaborador_anterior,
+        'colaborador_novo' => $colaborador_novo,
+        'data_transferencia' => current_time('mysql'),
+        'pdf_recebimento' => $pdf_recebimento,
+        'pdf_devolucao' => $pdf_devolucao
+    ]);
+    
+    return (int) $wpdb->insert_id;
+}
+
 // --- Handlers AJAX ---
 function handle_ajax(): void {
     global $wpdb, $tables;
@@ -349,6 +782,12 @@ function handle_ajax(): void {
             exit;
         }
         
+        // Buscar colaborador atual antes da atualização
+        $colaborador_anterior = $wpdb->get_var($wpdb->prepare(
+            "SELECT colaborador FROM {$tables->celulares} WHERE id = %d",
+            $celular_id
+        ));
+        
         // Determinar colaborador (novo ou existente)
         $colaborador_id = !empty($input['novo_colaborador']) 
             ? criar_colaborador($input) 
@@ -369,7 +808,68 @@ function handle_ajax(): void {
         // Atualizar ou inserir metas
         upsert_metas_celular($celular_id, $input);
         
-        echo json_encode(['success' => true, 'celular_id' => $celular_id]);
+        // Verificar se houve mudança de colaborador
+        $transferencia_id = null;
+        $pdfs = [];
+        
+        if ($colaborador_anterior != $colaborador_id) {
+            $transferencia_id = registrar_transferencia(
+                $celular_id, 
+                $colaborador_anterior ? (int) $colaborador_anterior : null, 
+                $colaborador_id
+            );
+            
+            // Buscar URLs dos PDFs gerados
+            if ($transferencia_id) {
+                $transf = $wpdb->get_row($wpdb->prepare(
+                    "SELECT pdf_recebimento, pdf_devolucao FROM {$tables->transferencias} WHERE id = %d",
+                    $transferencia_id
+                ), ARRAY_A);
+                
+                if ($transf) {
+                    $pdfs = [
+                        'recebimento' => $transf['pdf_recebimento'],
+                        'devolucao' => $transf['pdf_devolucao']
+                    ];
+                }
+            }
+        }
+        
+        echo json_encode([
+            'success' => true, 
+            'celular_id' => $celular_id,
+            'transferencia' => $transferencia_id ? true : false,
+            'pdfs' => $pdfs
+        ]);
+        exit;
+    }
+    
+    // Buscar histórico de transferências
+    if ($_GET['action'] === 'buscar_transferencias') {
+        $celular_id = isset($_GET['celular_id']) ? (int) $_GET['celular_id'] : 0;
+        
+        if (!$celular_id) {
+            echo json_encode(['success' => false, 'message' => 'ID do celular inválido']);
+            exit;
+        }
+        
+        $query = "
+            SELECT 
+                t.*,
+                ca.nome AS nome_anterior,
+                ca.sobrenome AS sobrenome_anterior,
+                cn.nome AS nome_novo,
+                cn.sobrenome AS sobrenome_novo
+            FROM {$tables->transferencias} t
+            LEFT JOIN {$tables->colaboradores} ca ON ca.id = t.colaborador_anterior
+            LEFT JOIN {$tables->colaboradores} cn ON cn.id = t.colaborador_novo
+            WHERE t.celular_id = %d
+            ORDER BY t.data_transferencia DESC
+        ";
+        
+        $transferencias = $wpdb->get_results($wpdb->prepare($query, $celular_id), ARRAY_A);
+        
+        echo json_encode(['success' => true, 'data' => $transferencias]);
         exit;
     }
     
@@ -516,6 +1016,7 @@ $data = fetch_rows();
                     <th>Matrícula</th>
                     <th>Setor</th>
                     <th>Local</th>
+                    <th>Histórico</th>
                     <th>Ações</th>
                 </tr>
             </thead>
@@ -547,6 +1048,15 @@ $data = fetch_rows();
                         <td><?php echo esc($r['setor'] ?? ''); ?></td>
                         <td><?php echo esc($r['local_trabalho'] ?? ''); ?></td>
                         <td>
+                            <button class="btn btn-sm btn-outline-info btn-historico" data-id="<?php echo esc($r['id']); ?>" title="Ver Histórico de Transferências">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8.515 1.019A7 7 0 0 0 8 1V0a8 8 0 0 1 .589.022l-.074.997zm2.004.45a7.003 7.003 0 0 0-.985-.299l.219-.976c.383.086.76.2 1.126.342l-.36.933zm1.37.71a7.01 7.01 0 0 0-.439-.27l.493-.87a8.025 8.025 0 0 1 .979.654l-.615.789a6.996 6.996 0 0 0-.418-.302zm1.834 1.79a6.99 6.99 0 0 0-.653-.796l.724-.69c.27.285.52.59.747.91l-.818.576zm.744 1.352a7.08 7.08 0 0 0-.214-.468l.893-.45a7.976 7.976 0 0 1 .45 1.088l-.95.313a7.023 7.023 0 0 0-.179-.483zm.53 2.507a6.991 6.991 0 0 0-.1-1.025l.985-.17c.067.386.106.778.116 1.17l-1 .025zm-.131 1.538c.033-.17.06-.339.081-.51l.993.123a7.957 7.957 0 0 1-.23 1.155l-.964-.267c.046-.165.086-.332.12-.501zm-.952 2.379c.184-.29.346-.594.486-.908l.914.405c-.16.36-.345.706-.555 1.038l-.845-.535zm-.964 1.205c.122-.122.239-.248.35-.378l.758.653a8.073 8.073 0 0 1-.401.432l-.707-.707z"/>
+                                    <path d="M8 1a7 7 0 1 0 4.95 11.95l.707.707A8.001 8.001 0 1 1 8 0v1z"/>
+                                    <path d="M7.5 3a.5.5 0 0 1 .5.5v5.21l3.248 1.856a.5.5 0 0 1-.496.868l-3.5-2A.5.5 0 0 1 7 9V3.5a.5.5 0 0 1 .5-.5z"/>
+                                </svg>
+                            </button>
+                        </td>
+                        <td>
                             <button class="btn btn-sm btn-outline-primary btn-editar" data-id="<?php echo esc($r['id']); ?>" title="Editar">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                                     <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
@@ -556,7 +1066,7 @@ $data = fetch_rows();
                     </tr>
                 <?php endforeach; ?>
             <?php else: ?>
-                <tr><td colspan="11" class="text-center text-muted">Nenhum registro.</td></tr>
+                <tr><td colspan="12" class="text-center text-muted">Nenhum registro.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
@@ -682,6 +1192,30 @@ $data = fetch_rows();
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                     <button type="button" class="btn btn-primary" id="btnSalvarCelular">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Histórico de Transferências -->
+    <div class="modal fade" id="modalHistorico" tabindex="-1" aria-labelledby="modalHistoricoLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalHistoricoLabel">Histórico de Transferências</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="historico-loading" class="text-center py-4" style="display:none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Carregando histórico...</p>
+                    </div>
+                    <div id="historico-conteudo"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
                 </div>
             </div>
         </div>
@@ -890,8 +1424,35 @@ $data = fetch_rows();
         .then(res => res.json())
         .then(result => {
             if (result.success) {
+                let mensagem = isEdit ? 'Celular atualizado com sucesso!' : 'Celular adicionado com sucesso!';
+                
+                // Se houve transferência, mostrar links para os PDFs
+                if (result.transferencia && result.pdfs) {
+                    mensagem += '<br><br><strong>Fichas geradas:</strong><br>';
+                    
+                    if (result.pdfs.recebimento) {
+                        mensagem += `<a href="${result.pdfs.recebimento}" target="_blank" class="btn btn-sm btn-primary mt-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8.5 6.5a.5.5 0 0 0-1 0v3.793L6.354 9.146a.5.5 0 1 0-.708.708l2 2a.5.5 0 0 0 .708 0l2-2a.5.5 0 0 0-.708-.708L8.5 10.293V6.5z"/>
+                                <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
+                            </svg>
+                            Ficha de Recebimento
+                        </a><br>`;
+                    }
+                    
+                    if (result.pdfs.devolucao) {
+                        mensagem += `<a href="${result.pdfs.devolucao}" target="_blank" class="btn btn-sm btn-warning mt-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8.5 6.5a.5.5 0 0 0-1 0v3.793L6.354 9.146a.5.5 0 1 0-.708.708l2 2a.5.5 0 0 0 .708 0l2-2a.5.5 0 0 0-.708-.708L8.5 10.293V6.5z"/>
+                                <path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/>
+                            </svg>
+                            Ficha de Devolução
+                        </a>`;
+                    }
+                }
+                
                 bootbox.alert({
-                    message: isEdit ? 'Celular atualizado com sucesso!' : 'Celular adicionado com sucesso!',
+                    message: mensagem,
                     callback: function() {
                         location.reload();
                     }
@@ -929,6 +1490,79 @@ $data = fetch_rows();
         imeiValido = true;
     });
 })();
+
+// Ver histórico de transferências
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.btn-historico')) {
+        const btn = e.target.closest('.btn-historico');
+        const celularId = btn.dataset.id;
+        
+        const modal = new bootstrap.Modal(document.getElementById('modalHistorico'));
+        const loading = document.getElementById('historico-loading');
+        const conteudo = document.getElementById('historico-conteudo');
+        
+        loading.style.display = 'block';
+        conteudo.innerHTML = '';
+        modal.show();
+        
+        fetch(`?action=buscar_transferencias&celular_id=${celularId}`)
+            .then(res => res.json())
+            .then(result => {
+                loading.style.display = 'none';
+                
+                if (result.success && result.data && result.data.length > 0) {
+                    let html = '<div class="table-responsive"><table class="table table-hover">';
+                    html += '<thead class="table-light"><tr>';
+                    html += '<th>Data</th><th>De</th><th>Para</th><th>Fichas</th>';
+                    html += '</tr></thead><tbody>';
+                    
+                    result.data.forEach(t => {
+                        const data = new Date(t.data_transferencia).toLocaleString('pt-BR');
+                        const de = t.nome_anterior ? `${t.nome_anterior} ${t.sobrenome_anterior}` : '<span class="text-muted">Estoque</span>';
+                        const para = t.nome_novo ? `${t.nome_novo} ${t.sobrenome_novo}` : '<span class="text-muted">Estoque</span>';
+                        
+                        html += `<tr><td>${data}</td><td>${de}</td><td>${para}</td><td>`;
+                        
+                        if (t.pdf_recebimento) {
+                            html += `<a href="${t.pdf_recebimento}" target="_blank" class="btn btn-sm btn-primary me-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                                </svg>
+                                Recebimento
+                            </a>`;
+                        }
+                        
+                        if (t.pdf_devolucao) {
+                            html += `<a href="${t.pdf_devolucao}" target="_blank" class="btn btn-sm btn-warning">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                                </svg>
+                                Devolução
+                            </a>`;
+                        }
+                        
+                        if (!t.pdf_recebimento && !t.pdf_devolucao) {
+                            html += '<span class="text-muted">Sem fichas</span>';
+                        }
+                        
+                        html += '</td></tr>';
+                    });
+                    
+                    html += '</tbody></table></div>';
+                    conteudo.innerHTML = html;
+                } else {
+                    conteudo.innerHTML = '<div class="alert alert-info">Nenhuma transferência registrada para este celular.</div>';
+                }
+            })
+            .catch(err => {
+                loading.style.display = 'none';
+                conteudo.innerHTML = '<div class="alert alert-danger">Erro ao carregar histórico.</div>';
+                console.error('Erro:', err);
+            });
+    }
+});
 
 // Editar celular
 document.addEventListener('click', function(e) {
