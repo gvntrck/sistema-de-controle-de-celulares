@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.2.1
+ * Version: 2.2.2
  */
 
 declare(strict_types=1);
