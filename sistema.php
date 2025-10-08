@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.4.0
+ * Version: 1.4.1
  */
 
 declare(strict_types=1);
@@ -440,6 +440,8 @@ $data = fetch_rows();
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Bootstrap 5 via CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootbox.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootbox@6.0.0/dist/bootbox.all.min.js"></script>
     <style>
         body { padding: 24px; }
         .table thead th { white-space: nowrap; }
@@ -800,8 +802,12 @@ $data = fetch_rows();
         
         // Verificar se IMEI é válido
         if (!imeiValido && imeiInput.value.trim() !== '') {
-            alert('O IMEI informado já está cadastrado em outro celular. Por favor, verifique o IMEI.');
-            imeiInput.focus();
+            bootbox.alert({
+                message: 'O IMEI informado já está cadastrado em outro celular. Por favor, verifique o IMEI.',
+                callback: function() {
+                    imeiInput.focus();
+                }
+            });
             return;
         }
         
@@ -837,17 +843,21 @@ $data = fetch_rows();
         .then(res => res.json())
         .then(result => {
             if (result.success) {
-                alert(isEdit ? 'Celular atualizado com sucesso!' : 'Celular adicionado com sucesso!');
-                location.reload();
+                bootbox.alert({
+                    message: isEdit ? 'Celular atualizado com sucesso!' : 'Celular adicionado com sucesso!',
+                    callback: function() {
+                        location.reload();
+                    }
+                });
             } else {
-                alert('Erro ao salvar celular');
+                bootbox.alert('Erro ao salvar celular');
                 btnSalvar.disabled = false;
                 btnSalvar.textContent = 'Salvar';
             }
         })
         .catch(err => {
             console.error('Erro:', err);
-            alert('Erro ao salvar celular');
+            bootbox.alert('Erro ao salvar celular');
             btnSalvar.disabled = false;
             btnSalvar.textContent = 'Salvar';
         });
@@ -909,12 +919,12 @@ document.addEventListener('click', function(e) {
                     const modal = new bootstrap.Modal(document.getElementById('modalAdicionarCelular'));
                     modal.show();
                 } else {
-                    alert('Erro ao carregar dados do celular');
+                    bootbox.alert('Erro ao carregar dados do celular');
                 }
             })
             .catch(err => {
                 console.error('Erro:', err);
-                alert('Erro ao carregar dados do celular');
+                bootbox.alert('Erro ao carregar dados do celular');
             });
     }
 });
