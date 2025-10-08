@@ -1,0 +1,606 @@
+<?php
+/**
+ * Arquivo único: /celulares-admin.php
+ * Coloque na raiz do WordPress. Requer wp-load.php.
+ * MVP: lista celulares + metadados + dados do colaborador.
+ * Version: 1.1.0
+ */
+
+declare(strict_types=1);
+
+// --- Bootstrap WordPress ---
+require_once __DIR__ . '/wp-load.php';
+
+/** @var wpdb $wpdb */
+global $wpdb;
+
+// --- Configurações básicas ---
+$prefix = $wpdb->prefix;
+$tables = (object) [
+    'celulares'          => $prefix . 'celulares',
+    'celulares_meta'     => $prefix . 'celulares_meta',
+    'colaboradores'      => $prefix . 'colaboradores',
+    'colaboradores_meta' => $prefix . 'colaboradores_meta',
+];
+
+// --- Helpers mínimos ---
+function esc($v): string { return esc_html((string) $v); }
+function collate(): string {
+    global $wpdb;
+    return $wpdb->get_charset_collate();
+}
+
+/**
+ * Cria tabelas se não existirem.
+ * Uso do modelo key/value para expansão simples.
+ */
+function ensure_schema(): void {
+    global $wpdb, $tables;
+
+    $sql = [];
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->colaboradores} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        nome VARCHAR(191) NOT NULL,
+        sobrenome VARCHAR(191) NOT NULL,
+        matricula VARCHAR(191) NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY uniq_matricula (matricula)
+    ) " . collate() . ";";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->colaboradores_meta} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        colaborador_id BIGINT UNSIGNED NOT NULL,
+        meta_key VARCHAR(191) NOT NULL,
+        meta_value LONGTEXT NULL,
+        PRIMARY KEY (id),
+        KEY idx_colab (colaborador_id),
+        KEY idx_key (meta_key),
+        CONSTRAINT fk_colab_meta FOREIGN KEY (colaborador_id)
+            REFERENCES {$tables->colaboradores}(id) ON DELETE CASCADE
+    ) " . collate() . ";";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->celulares} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        marca VARCHAR(191) NOT NULL,
+        modelo VARCHAR(191) NOT NULL,
+        colaborador BIGINT UNSIGNED NULL, -- FK para colaboradores.id
+        status VARCHAR(50) NOT NULL DEFAULT 'disponivel', -- ex: disponivel, emprestado, manutencao, inativo
+        PRIMARY KEY (id),
+        KEY idx_colaborador (colaborador),
+        CONSTRAINT fk_cel_colab FOREIGN KEY (colaborador)
+            REFERENCES {$tables->colaboradores}(id) ON DELETE SET NULL
+    ) " . collate() . ";";
+
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->celulares_meta} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        celular_id BIGINT UNSIGNED NOT NULL,
+        meta_key VARCHAR(191) NOT NULL,
+        meta_value LONGTEXT NULL,
+        PRIMARY KEY (id),
+        KEY idx_cel (celular_id),
+        KEY idx_key (meta_key),
+        CONSTRAINT fk_cel_meta FOREIGN KEY (celular_id)
+            REFERENCES {$tables->celulares}(id) ON DELETE CASCADE
+    ) " . collate() . ";";
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    foreach ($sql as $q) {
+        $wpdb->query($q); // idempotente com IF NOT EXISTS
+    }
+
+    // Garante chaves importantes de meta iniciais no comentário abaixo.
+    // celulares_meta padrão: imei, serial number
+    // colaboradores_meta padrão: setor, local
+}
+
+/**
+ * Consulta principal: celulares + metadados + colaborador + metadados
+ */
+function fetch_rows(): array {
+    global $wpdb, $tables;
+
+    $q = "
+        SELECT
+            c.id,
+            c.marca,
+            c.modelo,
+            c.status,
+            c.colaborador AS colaborador_id,
+            col.nome,
+            col.sobrenome,
+            col.matricula,
+            imei.meta_value   AS imei,
+            serial.meta_value AS serial_number,
+            setor.meta_value  AS setor,
+            local.meta_value  AS local_trabalho
+        FROM {$tables->celulares} c
+        LEFT JOIN {$tables->colaboradores} col
+            ON col.id = c.colaborador
+        LEFT JOIN {$tables->celulares_meta} imei
+            ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+        LEFT JOIN {$tables->celulares_meta} serial
+            ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+        LEFT JOIN {$tables->colaboradores_meta} setor
+            ON setor.colaborador_id = col.id AND setor.meta_key = 'setor'
+        LEFT JOIN {$tables->colaboradores_meta} local
+            ON local.colaborador_id = col.id AND local.meta_key = 'local'
+        ORDER BY c.id DESC
+        LIMIT 1000
+    ";
+    /** @var array<int,array<string,mixed>> */
+    $rows = $wpdb->get_results($q, ARRAY_A) ?: [];
+    return $rows;
+}
+
+// --- Handlers AJAX ---
+function handle_ajax(): void {
+    global $wpdb, $tables;
+    
+    if (!isset($_GET['action'])) {
+        return;
+    }
+    
+    header('Content-Type: application/json');
+    
+    // Buscar colaboradores
+    if ($_GET['action'] === 'buscar_colaboradores') {
+        $termo = isset($_GET['termo']) ? sanitize_text_field($_GET['termo']) : '';
+        
+        $sql = $wpdb->prepare(
+            "SELECT id, nome, sobrenome, matricula FROM {$tables->colaboradores} 
+             WHERE nome LIKE %s OR sobrenome LIKE %s OR matricula LIKE %s 
+             ORDER BY nome LIMIT 20",
+            '%' . $wpdb->esc_like($termo) . '%',
+            '%' . $wpdb->esc_like($termo) . '%',
+            '%' . $wpdb->esc_like($termo) . '%'
+        );
+        
+        $colaboradores = $wpdb->get_results($sql, ARRAY_A);
+        echo json_encode(['success' => true, 'data' => $colaboradores]);
+        exit;
+    }
+    
+    // Salvar celular
+    if ($_GET['action'] === 'salvar_celular' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $input = json_decode(file_get_contents('php://input'), true);
+        
+        $colaborador_id = null;
+        
+        // Se for novo colaborador
+        if (!empty($input['novo_colaborador'])) {
+            $wpdb->insert($tables->colaboradores, [
+                'nome' => sanitize_text_field($input['colaborador_nome']),
+                'sobrenome' => sanitize_text_field($input['colaborador_sobrenome']),
+                'matricula' => sanitize_text_field($input['colaborador_matricula'])
+            ]);
+            $colaborador_id = (int) $wpdb->insert_id;
+            
+            // Salvar metas do colaborador
+            if (!empty($input['colaborador_setor'])) {
+                $wpdb->insert($tables->colaboradores_meta, [
+                    'colaborador_id' => $colaborador_id,
+                    'meta_key' => 'setor',
+                    'meta_value' => sanitize_text_field($input['colaborador_setor'])
+                ]);
+            }
+            if (!empty($input['colaborador_local'])) {
+                $wpdb->insert($tables->colaboradores_meta, [
+                    'colaborador_id' => $colaborador_id,
+                    'meta_key' => 'local',
+                    'meta_value' => sanitize_text_field($input['colaborador_local'])
+                ]);
+            }
+        } else {
+            $colaborador_id = !empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null;
+        }
+        
+        // Inserir celular
+        $wpdb->insert($tables->celulares, [
+            'marca' => sanitize_text_field($input['marca']),
+            'modelo' => sanitize_text_field($input['modelo']),
+            'colaborador' => $colaborador_id,
+            'status' => sanitize_text_field($input['status'])
+        ]);
+        $celular_id = (int) $wpdb->insert_id;
+        
+        // Salvar metas do celular
+        if (!empty($input['imei'])) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => 'imei',
+                'meta_value' => sanitize_text_field($input['imei'])
+            ]);
+        }
+        if (!empty($input['serial_number'])) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => 'serial number',
+                'meta_value' => sanitize_text_field($input['serial_number'])
+            ]);
+        }
+        
+        echo json_encode(['success' => true, 'celular_id' => $celular_id]);
+        exit;
+    }
+}
+
+// --- Inicialização do schema ---
+ensure_schema();
+handle_ajax();
+
+// --- (Opcional) Semeadura mínima quando vazio para facilitar MVP ---
+function seed_if_empty(): void {
+    global $wpdb, $tables;
+
+    $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$tables->celulares}");
+    if ($count > 0) { return; }
+
+    // Insere colaborador
+    $wpdb->insert($tables->colaboradores, [
+        'nome' => 'Joao', 'sobrenome' => 'Silva', 'matricula' => 'A123'
+    ]);
+    $colabId = (int) $wpdb->insert_id;
+
+    // Metas do colaborador
+    $wpdb->insert($tables->colaboradores_meta, [
+        'colaborador_id' => $colabId, 'meta_key' => 'setor', 'meta_value' => 'Operacoes'
+    ]);
+    $wpdb->insert($tables->colaboradores_meta, [
+        'colaborador_id' => $colabId, 'meta_key' => 'local', 'meta_value' => 'Sao Paulo'
+    ]);
+
+    // Insere celular
+    $wpdb->insert($tables->celulares, [
+        'marca' => 'Samsung', 'modelo' => 'A54', 'colaborador' => $colabId, 'status' => 'emprestado'
+    ]);
+    $celId = (int) $wpdb->insert_id;
+
+    // Metas do celular
+    $wpdb->insert($tables->celulares_meta, [
+        'celular_id' => $celId, 'meta_key' => 'imei', 'meta_value' => '359999999999999'
+    ]);
+    $wpdb->insert($tables->celulares_meta, [
+        'celular_id' => $celId, 'meta_key' => 'serial number', 'meta_value' => 'SN-XYZ-001'
+    ]);
+}
+seed_if_empty();
+
+// --- Carrega dados para renderização ---
+$data = fetch_rows();
+?>
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Controle de Celulares - MVP</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Bootstrap 5 via CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 24px; }
+        .table thead th { white-space: nowrap; }
+        .status-badge { text-transform: capitalize; }
+        .search-input { max-width: 360px; }
+        .chip {
+            display:inline-block; padding:.25rem .5rem; border-radius:999px; background:#f1f3f5; font-size:.8rem;
+        }
+        .muted { color:#6c757d; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <header class="d-flex align-items-center justify-content-between mb-3">
+        <h1 class="h4 m-0">Controle de Celulares</h1>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAdicionarCelular">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
+                    <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>
+                </svg>
+                Adicionar Celular
+            </button>
+            <input id="search" type="search" class="form-control form-control-sm search-input" placeholder="Pesquisar...">
+            <span class="chip">Tabelas: <?php echo esc($tables->celulares); ?>, <?php echo esc($tables->celulares_meta); ?>, <?php echo esc($tables->colaboradores); ?>, <?php echo esc($tables->colaboradores_meta); ?></span>
+        </div>
+    </header>
+
+    <div class="table-responsive">
+        <table id="grid" class="table table-striped table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Marca</th>
+                    <th>Modelo</th>
+                    <th>IMEI</th>
+                    <th>Serial</th>
+                    <th>Status</th>
+                    <th>Colaborador</th>
+                    <th>Matrícula</th>
+                    <th>Setor</th>
+                    <th>Local</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php if ($data): ?>
+                <?php foreach ($data as $r): ?>
+                    <tr>
+                        <td><?php echo esc($r['id']); ?></td>
+                        <td><?php echo esc($r['marca']); ?></td>
+                        <td><?php echo esc($r['modelo']); ?></td>
+                        <td><code><?php echo esc($r['imei'] ?? ''); ?></code></td>
+                        <td><code><?php echo esc($r['serial_number'] ?? ''); ?></code></td>
+                        <td>
+                            <span class="badge bg-<?php
+                                $status = (string) ($r['status'] ?? '');
+                                echo $status === 'disponivel' ? 'success' :
+                                     ($status === 'emprestado' ? 'primary' :
+                                     ($status === 'manutencao' ? 'warning' : 'secondary'));
+                            ?> status-badge"><?php echo esc($status); ?></span>
+                        </td>
+                        <td>
+                            <?php
+                                $nomeCompleto = trim(($r['nome'] ?? '') . ' ' . ($r['sobrenome'] ?? ''));
+                                echo $nomeCompleto ? esc($nomeCompleto) : '<span class="muted">—</span>';
+                            ?>
+                        </td>
+                        <td><?php echo esc($r['matricula'] ?? ''); ?></td>
+                        <td><?php echo esc($r['setor'] ?? ''); ?></td>
+                        <td><?php echo esc($r['local_trabalho'] ?? ''); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <tr><td colspan="10" class="text-center text-muted">Nenhum registro.</td></tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Modal Adicionar Celular -->
+    <div class="modal fade" id="modalAdicionarCelular" tabindex="-1" aria-labelledby="modalAdicionarCelularLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalAdicionarCelularLabel">Adicionar Celular</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="formAdicionarCelular">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="marca" class="form-label">Marca *</label>
+                                <input type="text" class="form-control" id="marca" name="marca" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="modelo" class="form-label">Modelo *</label>
+                                <input type="text" class="form-control" id="modelo" name="modelo" required>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="imei" class="form-label">IMEI</label>
+                                <input type="text" class="form-control" id="imei" name="imei">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="serial_number" class="form-label">Serial Number</label>
+                                <input type="text" class="form-control" id="serial_number" name="serial_number">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="status" class="form-label">Status *</label>
+                            <select class="form-select" id="status" name="status" required>
+                                <option value="disponivel">Disponível</option>
+                                <option value="emprestado">Emprestado</option>
+                                <option value="manutencao">Manutenção</option>
+                                <option value="inativo">Inativo</option>
+                            </select>
+                        </div>
+                        
+                        <hr class="my-4">
+                        <h6 class="mb-3">Dados do Colaborador</h6>
+                        
+                        <div class="mb-3">
+                            <label for="busca_colaborador" class="form-label">Buscar Colaborador</label>
+                            <input type="text" class="form-control" id="busca_colaborador" placeholder="Digite o nome ou matrícula..." autocomplete="off">
+                            <input type="hidden" id="colaborador_id" name="colaborador_id">
+                            <div id="lista_colaboradores" class="list-group mt-2" style="display:none; max-height: 200px; overflow-y: auto;"></div>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="novo_colaborador" name="novo_colaborador">
+                            <label class="form-check-label" for="novo_colaborador">
+                                Adicionar novo colaborador
+                            </label>
+                        </div>
+                        
+                        <div id="campos_novo_colaborador" style="display:none;">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="colaborador_nome" class="form-label">Nome *</label>
+                                    <input type="text" class="form-control" id="colaborador_nome" name="colaborador_nome">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="colaborador_sobrenome" class="form-label">Sobrenome *</label>
+                                    <input type="text" class="form-control" id="colaborador_sobrenome" name="colaborador_sobrenome">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="colaborador_matricula" class="form-label">Matrícula *</label>
+                                    <input type="text" class="form-control" id="colaborador_matricula" name="colaborador_matricula">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="colaborador_setor" class="form-label">Setor</label>
+                                    <input type="text" class="form-control" id="colaborador_setor" name="colaborador_setor">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="colaborador_local" class="form-label">Local</label>
+                                    <input type="text" class="form-control" id="colaborador_local" name="colaborador_local">
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnSalvarCelular">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+   
+</div>
+
+<!-- JS: Bootstrap e filtro simples local -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    const input = document.getElementById('search');
+    const table = document.getElementById('grid');
+    const rows = Array.from(table.tBodies[0].rows);
+
+    function normalizar(t) { return t.toLowerCase(); }
+
+    input.addEventListener('input', function () {
+        const q = normalizar(this.value);
+        rows.forEach(tr => {
+            const text = normalizar(tr.innerText);
+            tr.style.display = text.includes(q) ? '' : 'none';
+        });
+    });
+})();
+
+// Sistema de busca e adição de celular
+(function() {
+    const buscaInput = document.getElementById('busca_colaborador');
+    const listaDiv = document.getElementById('lista_colaboradores');
+    const colaboradorIdInput = document.getElementById('colaborador_id');
+    const novoColabCheckbox = document.getElementById('novo_colaborador');
+    const camposNovoColab = document.getElementById('campos_novo_colaborador');
+    const btnSalvar = document.getElementById('btnSalvarCelular');
+    const form = document.getElementById('formAdicionarCelular');
+    let timeoutBusca = null;
+    
+    // Toggle campos de novo colaborador
+    novoColabCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            camposNovoColab.style.display = 'block';
+            buscaInput.disabled = true;
+            colaboradorIdInput.value = '';
+            listaDiv.style.display = 'none';
+            // Tornar campos obrigatórios
+            document.getElementById('colaborador_nome').required = true;
+            document.getElementById('colaborador_sobrenome').required = true;
+            document.getElementById('colaborador_matricula').required = true;
+        } else {
+            camposNovoColab.style.display = 'none';
+            buscaInput.disabled = false;
+            // Remover obrigatoriedade
+            document.getElementById('colaborador_nome').required = false;
+            document.getElementById('colaborador_sobrenome').required = false;
+            document.getElementById('colaborador_matricula').required = false;
+        }
+    });
+    
+    // Busca de colaboradores
+    buscaInput.addEventListener('input', function() {
+        const termo = this.value.trim();
+        
+        clearTimeout(timeoutBusca);
+        
+        if (termo.length < 2) {
+            listaDiv.style.display = 'none';
+            return;
+        }
+        
+        timeoutBusca = setTimeout(() => {
+            fetch(`?action=buscar_colaboradores&termo=${encodeURIComponent(termo)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success && data.data.length > 0) {
+                        listaDiv.innerHTML = data.data.map(c => 
+                            `<a href="#" class="list-group-item list-group-item-action" data-id="${c.id}" data-nome="${c.nome} ${c.sobrenome}">
+                                <strong>${c.nome} ${c.sobrenome}</strong> - ${c.matricula}
+                            </a>`
+                        ).join('');
+                        listaDiv.style.display = 'block';
+                    } else {
+                        listaDiv.innerHTML = '<div class="list-group-item text-muted">Nenhum colaborador encontrado</div>';
+                        listaDiv.style.display = 'block';
+                    }
+                })
+                .catch(err => console.error('Erro ao buscar colaboradores:', err));
+        }, 300);
+    });
+    
+    // Selecionar colaborador da lista
+    listaDiv.addEventListener('click', function(e) {
+        e.preventDefault();
+        const item = e.target.closest('.list-group-item-action');
+        if (item) {
+            colaboradorIdInput.value = item.dataset.id;
+            buscaInput.value = item.dataset.nome;
+            listaDiv.style.display = 'none';
+        }
+    });
+    
+    // Salvar celular
+    btnSalvar.addEventListener('click', function() {
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+        
+        const formData = new FormData(form);
+        const data = {};
+        formData.forEach((value, key) => {
+            if (key === 'novo_colaborador') {
+                data[key] = novoColabCheckbox.checked;
+            } else {
+                data[key] = value;
+            }
+        });
+        
+        btnSalvar.disabled = true;
+        btnSalvar.textContent = 'Salvando...';
+        
+        fetch('?action=salvar_celular', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                alert('Celular adicionado com sucesso!');
+                location.reload();
+            } else {
+                alert('Erro ao salvar celular');
+                btnSalvar.disabled = false;
+                btnSalvar.textContent = 'Salvar';
+            }
+        })
+        .catch(err => {
+            console.error('Erro:', err);
+            alert('Erro ao salvar celular');
+            btnSalvar.disabled = false;
+            btnSalvar.textContent = 'Salvar';
+        });
+    });
+    
+    // Limpar formulário ao fechar modal
+    document.getElementById('modalAdicionarCelular').addEventListener('hidden.bs.modal', function() {
+        form.reset();
+        colaboradorIdInput.value = '';
+        listaDiv.style.display = 'none';
+        camposNovoColab.style.display = 'none';
+        novoColabCheckbox.checked = false;
+        buscaInput.disabled = false;
+        btnSalvar.disabled = false;
+        btnSalvar.textContent = 'Salvar';
+    });
+})();
+</script>
+</body>
+</html>
