@@ -402,6 +402,7 @@ $data = fetch_rows();
                             <label for="busca_colaborador" class="form-label">Buscar Colaborador</label>
                             <input type="text" class="form-control" id="busca_colaborador" placeholder="Digite o nome ou matrícula..." autocomplete="off">
                             <input type="hidden" id="colaborador_id" name="colaborador_id">
+                            <div id="status_busca" class="form-text text-muted mt-1" style="display:none;"></div>
                             <div id="lista_colaboradores" class="list-group mt-2" style="display:none; max-height: 200px; overflow-y: auto;"></div>
                         </div>
                         
@@ -478,6 +479,7 @@ $data = fetch_rows();
     const camposNovoColab = document.getElementById('campos_novo_colaborador');
     const btnSalvar = document.getElementById('btnSalvarCelular');
     const form = document.getElementById('formAdicionarCelular');
+    const statusBusca = document.getElementById('status_busca');
     let timeoutBusca = null;
     
     // Toggle campos de novo colaborador
@@ -509,13 +511,22 @@ $data = fetch_rows();
         
         if (termo.length < 2) {
             listaDiv.style.display = 'none';
+            statusBusca.style.display = 'none';
             return;
         }
         
         timeoutBusca = setTimeout(() => {
+            statusBusca.innerHTML = `
+                <span class="d-inline-flex align-items-center gap-2 text-muted">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Pesquisando colaboradores...
+                </span>`;
+            statusBusca.style.display = 'block';
+            listaDiv.style.display = 'none';
             fetch(`?action=buscar_colaboradores&termo=${encodeURIComponent(termo)}`)
                 .then(res => res.json())
                 .then(data => {
+                    statusBusca.style.display = 'none';
                     if (data.success && data.data.length > 0) {
                         listaDiv.innerHTML = data.data.map(c => 
                             `<a href="#" class="list-group-item list-group-item-action" data-id="${c.id}" data-nome="${c.nome} ${c.sobrenome}">
@@ -594,6 +605,7 @@ $data = fetch_rows();
         form.reset();
         colaboradorIdInput.value = '';
         listaDiv.style.display = 'none';
+        statusBusca.style.display = 'none';
         camposNovoColab.style.display = 'none';
         novoColabCheckbox.checked = false;
         buscaInput.disabled = false;
