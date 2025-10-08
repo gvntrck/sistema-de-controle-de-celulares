@@ -1,0 +1,35 @@
+name: Deploy via FTP
+
+on:
+  push:
+    branches: [ "main" ]   # ajuste se seu branch for outro
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Opcional: build, minificação etc.
+      # - run: npm ci && npm run build
+
+      - name: Deploy to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftp           # troque para ftps se suportado
+          port: ${{ secrets.FTP_PORT }}
+          local-dir: ./
+          server-dir: /domains/projetoalfa.org/public_html/
+          # Boas práticas: não subir artefatos indesejados
+          exclude: |
+            **/.git*
+            **/.github/**
+            **/node_modules/**
+            **/.DS_Store
+            **/README.md
+            **/.env
