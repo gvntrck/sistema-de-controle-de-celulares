@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.3.2
+ * Version: 1.4.0
  */
 
 declare(strict_types=1);
@@ -350,6 +350,42 @@ function handle_ajax(): void {
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
     }
+    
+    // Verificar IMEI duplicado
+    if ($_GET['action'] === 'verificar_imei') {
+        $imei = isset($_GET['imei']) ? sanitize_text_field($_GET['imei']) : '';
+        $celular_id_atual = isset($_GET['celular_id']) ? (int) $_GET['celular_id'] : 0;
+        
+        if (empty($imei)) {
+            echo json_encode(['success' => true, 'disponivel' => true]);
+            exit;
+        }
+        
+        $query = "
+            SELECT c.id, c.marca, c.modelo 
+            FROM {$tables->celulares_meta} cm
+            INNER JOIN {$tables->celulares} c ON c.id = cm.celular_id
+            WHERE cm.meta_key = 'imei' AND cm.meta_value = %s
+        ";
+        
+        if ($celular_id_atual > 0) {
+            $query .= " AND c.id != %d";
+            $resultado = $wpdb->get_row($wpdb->prepare($query, $imei, $celular_id_atual), ARRAY_A);
+        } else {
+            $resultado = $wpdb->get_row($wpdb->prepare($query, $imei), ARRAY_A);
+        }
+        
+        if ($resultado) {
+            echo json_encode([
+                'success' => true, 
+                'disponivel' => false,
+                'celular' => $resultado
+            ]);
+        } else {
+            echo json_encode(['success' => true, 'disponivel' => true]);
+        }
+        exit;
+    }
 }
 
 // --- Inicialização do schema ---
@@ -516,6 +552,7 @@ $data = fetch_rows();
                             <div class="col-md-6 mb-3">
                                 <label for="imei" class="form-label">IMEI</label>
                                 <input type="text" class="form-control" id="imei" name="imei">
+                                <div id="imei_feedback" class="form-text" style="display:none;"></div>
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label for="serial_number" class="form-label">Serial Number</label>
@@ -632,7 +669,55 @@ $data = fetch_rows();
     const btnSalvar = document.getElementById('btnSalvarCelular');
     const form = document.getElementById('formAdicionarCelular');
     const statusBusca = document.getElementById('status_busca');
+    const imeiInput = document.getElementById('imei');
+    const imeiFeedback = document.getElementById('imei_feedback');
     let timeoutBusca = null;
+    let timeoutImei = null;
+    let imeiValido = true;
+    
+    // Validação de IMEI
+    imeiInput.addEventListener('input', function() {
+        const imei = this.value.trim();
+        
+        clearTimeout(timeoutImei);
+        
+        if (imei.length === 0) {
+            imeiFeedback.style.display = 'none';
+            imeiInput.classList.remove('is-invalid', 'is-valid');
+            imeiValido = true;
+            return;
+        }
+        
+        timeoutImei = setTimeout(() => {
+            const celularIdEdit = document.getElementById('celular_id_edit').value;
+            const url = `?action=verificar_imei&imei=${encodeURIComponent(imei)}${celularIdEdit ? '&celular_id=' + celularIdEdit : ''}`;
+            
+            fetch(url)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        if (data.disponivel) {
+                            imeiInput.classList.remove('is-invalid');
+                            imeiInput.classList.add('is-valid');
+                            imeiFeedback.className = 'form-text text-success';
+                            imeiFeedback.innerHTML = '✓ IMEI disponível';
+                            imeiFeedback.style.display = 'block';
+                            imeiValido = true;
+                        } else {
+                            imeiInput.classList.remove('is-valid');
+                            imeiInput.classList.add('is-invalid');
+                            imeiFeedback.className = 'form-text text-danger';
+                            imeiFeedback.innerHTML = `✗ IMEI já cadastrado no celular: ${data.celular.marca} ${data.celular.modelo} (ID: ${data.celular.id})`;
+                            imeiFeedback.style.display = 'block';
+                            imeiValido = false;
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error('Erro ao verificar IMEI:', err);
+                });
+        }, 500);
+    });
     
     // Toggle campos de novo colaborador
     novoColabCheckbox.addEventListener('change', function() {
@@ -713,6 +798,13 @@ $data = fetch_rows();
             return;
         }
         
+        // Verificar se IMEI é válido
+        if (!imeiValido && imeiInput.value.trim() !== '') {
+            alert('O IMEI informado já está cadastrado em outro celular. Por favor, verifique o IMEI.');
+            imeiInput.focus();
+            return;
+        }
+        
         const formData = new FormData(form);
         const data = {};
         formData.forEach((value, key) => {
@@ -774,6 +866,10 @@ $data = fetch_rows();
         buscaInput.disabled = false;
         btnSalvar.disabled = false;
         btnSalvar.textContent = 'Salvar';
+        // Limpar validação de IMEI
+        imeiFeedback.style.display = 'none';
+        imeiInput.classList.remove('is-invalid', 'is-valid');
+        imeiValido = true;
     });
 })();
 
