@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.3.1
+ * Version: 1.3.2
  */
 
 declare(strict_types=1);
@@ -233,6 +233,13 @@ function handle_ajax(): void {
                 'meta_value' => sanitize_text_field($input['data_entrega'])
             ]);
         }
+        if (!empty($input['observacao'])) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => 'observacao',
+                'meta_value' => sanitize_textarea_field($input['observacao'])
+            ]);
+        }
         
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
@@ -255,7 +262,8 @@ function handle_ajax(): void {
                 imei.meta_value   AS imei,
                 serial.meta_value AS serial_number,
                 aquisicao.meta_value AS data_aquisicao,
-                entrega.meta_value AS data_entrega
+                entrega.meta_value AS data_entrega,
+                obs.meta_value AS observacao
             FROM {$tables->celulares} c
             LEFT JOIN {$tables->colaboradores} col
                 ON col.id = c.colaborador
@@ -267,6 +275,8 @@ function handle_ajax(): void {
                 ON aquisicao.celular_id = c.id AND aquisicao.meta_key = 'data_aquisicao'
             LEFT JOIN {$tables->celulares_meta} entrega
                 ON entrega.celular_id = c.id AND entrega.meta_key = 'data_entrega'
+            LEFT JOIN {$tables->celulares_meta} obs
+                ON obs.celular_id = c.id AND obs.meta_key = 'observacao'
             WHERE c.id = %d
         ";
         
@@ -309,7 +319,8 @@ function handle_ajax(): void {
             'imei' => $input['imei'] ?? '',
             'serial number' => $input['serial_number'] ?? '',
             'data_aquisicao' => $input['data_aquisicao'] ?? '',
-            'data_entrega' => $input['data_entrega'] ?? ''
+            'data_entrega' => $input['data_entrega'] ?? '',
+            'observacao' => $input['observacao'] ?? ''
         ];
         
         foreach ($metas as $key => $value) {
@@ -323,14 +334,14 @@ function handle_ajax(): void {
                 if ($exists) {
                     $wpdb->update(
                         $tables->celulares_meta,
-                        ['meta_value' => sanitize_text_field($value)],
+                        ['meta_value' => $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value)],
                         ['celular_id' => $celular_id, 'meta_key' => $key]
                     );
                 } else {
                     $wpdb->insert($tables->celulares_meta, [
                         'celular_id' => $celular_id,
                         'meta_key' => $key,
-                        'meta_value' => sanitize_text_field($value)
+                        'meta_value' => $key === 'observacao' ? sanitize_textarea_field($value) : sanitize_text_field($value)
                     ]);
                 }
             }
@@ -530,6 +541,10 @@ $data = fetch_rows();
                                 <option value="defeito">Defeito</option>
                                 <option value="inativo">Inativo</option>
                             </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="observacao" class="form-label">Observação</label>
+                            <textarea class="form-control" id="observacao" name="observacao" rows="3" placeholder="Digite observações sobre o celular..."></textarea>
                         </div>
                         
                         <hr class="my-4">
@@ -782,6 +797,7 @@ document.addEventListener('click', function(e) {
                     document.getElementById('serial_number').value = d.serial_number || '';
                     document.getElementById('data_aquisicao').value = d.data_aquisicao || '';
                     document.getElementById('data_entrega').value = d.data_entrega || '';
+                    document.getElementById('observacao').value = d.observacao || '';
                     document.getElementById('status').value = d.status || 'disponivel';
                     
                     // Preencher colaborador se existir
