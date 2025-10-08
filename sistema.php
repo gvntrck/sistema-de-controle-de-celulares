@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.6.0
+ * Version: 1.7.0
  */
 
 declare(strict_types=1);
@@ -178,6 +178,8 @@ function salvar_metas_celular(int $celular_id, array $input): void {
         'serial number' => $input['serial_number'] ?? '',
         'data_aquisicao' => $input['data_aquisicao'] ?? '',
         'data_entrega' => $input['data_entrega'] ?? '',
+        'propriedade' => $input['propriedade'] ?? '',
+        'selb' => $input['selb'] ?? '',
         'observacao' => $input['observacao'] ?? ''
     ];
     
@@ -201,6 +203,8 @@ function upsert_metas_celular(int $celular_id, array $input): void {
         'serial number' => $input['serial_number'] ?? '',
         'data_aquisicao' => $input['data_aquisicao'] ?? '',
         'data_entrega' => $input['data_entrega'] ?? '',
+        'propriedade' => $input['propriedade'] ?? '',
+        'selb' => $input['selb'] ?? '',
         'observacao' => $input['observacao'] ?? ''
     ];
     
@@ -302,6 +306,8 @@ function handle_ajax(): void {
                 serial.meta_value AS serial_number,
                 aquisicao.meta_value AS data_aquisicao,
                 entrega.meta_value AS data_entrega,
+                prop.meta_value AS propriedade,
+                selb.meta_value AS selb,
                 obs.meta_value AS observacao
             FROM {$tables->celulares} c
             LEFT JOIN {$tables->colaboradores} col
@@ -314,6 +320,10 @@ function handle_ajax(): void {
                 ON aquisicao.celular_id = c.id AND aquisicao.meta_key = 'data_aquisicao'
             LEFT JOIN {$tables->celulares_meta} entrega
                 ON entrega.celular_id = c.id AND entrega.meta_key = 'data_entrega'
+            LEFT JOIN {$tables->celulares_meta} prop
+                ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+            LEFT JOIN {$tables->celulares_meta} selb
+                ON selb.celular_id = c.id AND selb.meta_key = 'selb'
             LEFT JOIN {$tables->celulares_meta} obs
                 ON obs.celular_id = c.id AND obs.meta_key = 'observacao'
             WHERE c.id = %d
@@ -583,6 +593,20 @@ $data = fetch_rows();
                             <div class="col-md-6 mb-3">
                                 <label for="data_entrega" class="form-label">Data de Entrega ao Colaborador</label>
                                 <input type="date" class="form-control" id="data_entrega" name="data_entrega">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="propriedade" class="form-label">Propriedade *</label>
+                                <select class="form-select" id="propriedade" name="propriedade" required>
+                                    <option value="">Selecione...</option>
+                                    <option value="Metalife">Metalife</option>
+                                    <option value="Selbetti">Selbetti</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="selb" class="form-label">SELB</label>
+                                <input type="text" class="form-control" id="selb" name="selb" placeholder="Código SELB">
                             </div>
                         </div>
                         <div class="mb-3">
@@ -917,6 +941,8 @@ document.addEventListener('click', function(e) {
                     document.getElementById('serial_number').value = d.serial_number || '';
                     document.getElementById('data_aquisicao').value = d.data_aquisicao || '';
                     document.getElementById('data_entrega').value = d.data_entrega || '';
+                    document.getElementById('propriedade').value = d.propriedade || '';
+                    document.getElementById('selb').value = d.selb || '';
                     document.getElementById('observacao').value = d.observacao || '';
                     document.getElementById('status').value = d.status || 'disponivel';
                     
