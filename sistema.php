@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.8.0
+ * Version: 1.9.0
  */
 
 declare(strict_types=1);
@@ -210,6 +210,88 @@ function ensure_schema(): void {
     // Garante chaves importantes de meta iniciais no comentário abaixo.
     // celulares_meta padrão: imei, serial number
     // colaboradores_meta padrão: setor, local
+}
+
+/**
+ * Busca estatísticas do sistema para o dashboard
+ */
+function fetch_dashboard_stats(): array {
+    global $wpdb, $tables;
+    
+    // Total de celulares por status
+    $stats_status = $wpdb->get_results("
+        SELECT status, COUNT(*) as total
+        FROM {$tables->celulares}
+        GROUP BY status
+    ", ARRAY_A);
+    
+    $stats = [
+        'disponivel' => 0,
+        'emprestado' => 0,
+        'manutencao' => 0,
+        'defeito' => 0,
+        'inativo' => 0,
+        'total' => 0
+    ];
+    
+    foreach ($stats_status as $row) {
+        $status = $row['status'];
+        $total = (int) $row['total'];
+        if (isset($stats[$status])) {
+            $stats[$status] = $total;
+        }
+        $stats['total'] += $total;
+    }
+    
+    // Total de colaboradores com celular
+    $stats['colaboradores_com_celular'] = (int) $wpdb->get_var("
+        SELECT COUNT(DISTINCT colaborador)
+        FROM {$tables->celulares}
+        WHERE colaborador IS NOT NULL
+    ");
+    
+    // Total de colaboradores cadastrados
+    $stats['total_colaboradores'] = (int) $wpdb->get_var("
+        SELECT COUNT(*) FROM {$tables->colaboradores}
+    ");
+    
+    // Total de transferências no último mês
+    $stats['transferencias_mes'] = (int) $wpdb->get_var("
+        SELECT COUNT(*)
+        FROM {$tables->transferencias}
+        WHERE data_transferencia >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+    ");
+    
+    // Celulares em manutenção há mais de 30 dias
+    $stats['manutencao_longa'] = (int) $wpdb->get_var($wpdb->prepare("
+        SELECT COUNT(DISTINCT c.id)
+        FROM {$tables->celulares} c
+        LEFT JOIN {$tables->transferencias} t ON t.celular_id = c.id
+        WHERE c.status = %s
+        AND (t.data_transferencia IS NULL OR t.data_transferencia < DATE_SUB(NOW(), INTERVAL 30 DAY))
+    ", 'manutencao'));
+    
+    // Distribuição por propriedade
+    $stats_prop = $wpdb->get_results("
+        SELECT cm.meta_value as propriedade, COUNT(*) as total
+        FROM {$tables->celulares} c
+        LEFT JOIN {$tables->celulares_meta} cm ON cm.celular_id = c.id AND cm.meta_key = 'propriedade'
+        WHERE cm.meta_value IS NOT NULL
+        GROUP BY cm.meta_value
+    ", ARRAY_A);
+    
+    $stats['metalife'] = 0;
+    $stats['selbetti'] = 0;
+    
+    foreach ($stats_prop as $row) {
+        if ($row['propriedade'] === 'Metalife') {
+            $stats['metalife'] = (int) $row['total'];
+        } elseif ($row['propriedade'] === 'Selbetti') {
+            $stats['selbetti'] = (int) $row['total'];
+        }
+    }
+    
+    return $stats;
 }
 
 /**
@@ -1080,6 +1162,7 @@ seed_if_empty();
 
 // --- Carrega dados para renderização ---
 $data = fetch_rows();
+$dashboard_stats = fetch_dashboard_stats();
 ?>
 <!doctype html>
 <html lang="pt-br">
@@ -1094,7 +1177,7 @@ $data = fetch_rows();
     <!-- Bootbox.js via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/bootbox@6.0.0/dist/bootbox.all.min.js"></script>
     <style>
-        body { padding: 24px; }
+        body { padding: 24px; background: #f8f9fa; }
         .table thead th { white-space: nowrap; }
         .status-badge { text-transform: capitalize; }
         .search-input { max-width: 360px; }
@@ -1102,6 +1185,70 @@ $data = fetch_rows();
             display:inline-block; padding:.25rem .5rem; border-radius:999px; background:#f1f3f5; font-size:.8rem;
         }
         .muted { color:#6c757d; }
+        
+        /* Dashboard KPI Cards */
+        .kpi-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-left: 4px solid;
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        .kpi-card.primary { border-left-color: #0d6efd; }
+        .kpi-card.success { border-left-color: #198754; }
+        .kpi-card.warning { border-left-color: #ffc107; }
+        .kpi-card.danger { border-left-color: #dc3545; }
+        .kpi-card.info { border-left-color: #0dcaf0; }
+        .kpi-card.secondary { border-left-color: #6c757d; }
+        
+        .kpi-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            line-height: 1;
+            margin: 10px 0;
+        }
+        .kpi-label {
+            color: #6c757d;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+        .kpi-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        .kpi-icon.primary { background: #e7f1ff; color: #0d6efd; }
+        .kpi-icon.success { background: #d1e7dd; color: #198754; }
+        .kpi-icon.warning { background: #fff3cd; color: #ffc107; }
+        .kpi-icon.danger { background: #f8d7da; color: #dc3545; }
+        .kpi-icon.info { background: #cff4fc; color: #0dcaf0; }
+        .kpi-icon.secondary { background: #e2e3e5; color: #6c757d; }
+        
+        .kpi-footer {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e9ecef;
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .dashboard-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
     </style>
 </head>
 <body>
@@ -1115,9 +1262,16 @@ $data = fetch_rows();
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
     </div>
     
-    <header class="d-flex align-items-center justify-content-between mb-3">
-        <h1 class="h4 m-0">Controle de Celulares</h1>
+    <header class="d-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 m-0">Controle de Celulares</h1>
         <div class="d-flex gap-2 align-items-center">
+            <button type="button" class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#modalDashboard">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M6 1H1v3h5V1zm9 0h-5v5h5V1zm0 6h-5v5h5V7zM6 8H1v7h5V8z"/>
+                    <path d="M1 0a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1H1zm0 7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H1zm9-7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1h-5zm0 7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-5z"/>
+                </svg>
+                Dashboard
+            </button>
             <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAdicionarCelular">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
                     <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>
@@ -1142,7 +1296,10 @@ $data = fetch_rows();
         </div>
     </header>
 
-    <div class="table-responsive">
+    <!-- Tabela de Inventário -->
+    <div class="dashboard-section">
+        <h5 class="mb-3">Inventário Completo</h5>
+        <div class="table-responsive">
         <table id="grid" class="table table-striped table-hover align-middle">
             <thead class="table-light">
                 <tr>
@@ -1210,6 +1367,176 @@ $data = fetch_rows();
             <?php endif; ?>
             </tbody>
         </table>
+        </div>
+    </div>
+
+    <!-- Modal Dashboard KPIs -->
+    <div class="modal fade" id="modalDashboard" tabindex="-1" aria-labelledby="modalDashboardLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title" id="modalDashboardLabel">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle; margin-right: 8px;">
+                            <path d="M6 1H1v3h5V1zm9 0h-5v5h5V1zm0 6h-5v5h5V7zM6 8H1v7h5V8z"/>
+                            <path d="M1 0a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1H1zm0 7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H1zm9-7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1h-5zm0 7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-5z"/>
+                        </svg>
+                        Dashboard - Indicadores do Sistema
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body" style="background: #f8f9fa;">
+                    <!-- Dashboard KPIs -->
+                    <div class="row g-3 mb-3">
+                        <!-- Total de Celulares -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card info">
+                                <div class="kpi-icon info">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M11 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h6zM5 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H5z"/>
+                                        <path d="M8 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Total de Celulares</div>
+                                <div class="kpi-value text-info"><?php echo esc($dashboard_stats['total']); ?></div>
+                                <div class="kpi-footer">
+                                    <strong><?php echo esc($dashboard_stats['metalife']); ?></strong> Metalife • 
+                                    <strong><?php echo esc($dashboard_stats['selbetti']); ?></strong> Selbetti
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Disponíveis -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card success">
+                                <div class="kpi-icon success">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Disponíveis</div>
+                                <div class="kpi-value text-success"><?php echo esc($dashboard_stats['disponivel']); ?></div>
+                                <div class="kpi-footer">
+                                    <?php 
+                                    $perc_disp = $dashboard_stats['total'] > 0 ? round(($dashboard_stats['disponivel'] / $dashboard_stats['total']) * 100, 1) : 0;
+                                    echo esc($perc_disp);
+                                    ?>% do total
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Emprestados -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card primary">
+                                <div class="kpi-icon primary">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Emprestados</div>
+                                <div class="kpi-value text-primary"><?php echo esc($dashboard_stats['emprestado']); ?></div>
+                                <div class="kpi-footer">
+                                    <strong><?php echo esc($dashboard_stats['colaboradores_com_celular']); ?></strong> colaboradores ativos
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Em Manutenção -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card warning">
+                                <div class="kpi-icon warning">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M9.293 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.707A1 1 0 0 0 13.707 4L10 .293A1 1 0 0 0 9.293 0zM9.5 3.5v-2l3 3h-2a1 1 0 0 1-1-1zM6.354 9.854a.5.5 0 0 1-.708-.708l2-2a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 8.707V12.5a.5.5 0 0 1-1 0V8.707L6.354 9.854z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Em Manutenção</div>
+                                <div class="kpi-value text-warning"><?php echo esc($dashboard_stats['manutencao']); ?></div>
+                                <div class="kpi-footer">
+                                    <?php if ($dashboard_stats['manutencao_longa'] > 0): ?>
+                                        <span class="text-danger">⚠ <?php echo esc($dashboard_stats['manutencao_longa']); ?> há mais de 30 dias</span>
+                                    <?php else: ?>
+                                        Nenhum alerta
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Linha 2 de KPIs -->
+                    <div class="row g-3">
+                        <!-- Com Defeito -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card danger">
+                                <div class="kpi-icon danger">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Com Defeito</div>
+                                <div class="kpi-value text-danger"><?php echo esc($dashboard_stats['defeito']); ?></div>
+                                <div class="kpi-footer">
+                                    Requer atenção
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Inativos -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card secondary">
+                                <div class="kpi-icon secondary">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M6 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-5 6s-1 0-1-1 1-4 6-4 6 3 6 4-1 1-1 1H1zM11 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1-.5-.5zm.5 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zm2 3a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Inativos</div>
+                                <div class="kpi-value text-secondary"><?php echo esc($dashboard_stats['inativo']); ?></div>
+                                <div class="kpi-footer">
+                                    Fora de circulação
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Total Colaboradores -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card info">
+                                <div class="kpi-icon info">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                                        <path fill-rule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/>
+                                        <path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Colaboradores</div>
+                                <div class="kpi-value text-info"><?php echo esc($dashboard_stats['total_colaboradores']); ?></div>
+                                <div class="kpi-footer">
+                                    <?php echo esc($dashboard_stats['colaboradores_com_celular']); ?> com celular ativo
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Transferências do Mês -->
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <div class="kpi-card primary">
+                                <div class="kpi-icon primary">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M8.515 1.019A7 7 0 0 0 8 1V0a8 8 0 0 1 .589.022l-.074.997zm2.004.45a7.003 7.003 0 0 0-.985-.299l.219-.976c.383.086.76.2 1.126.342l-.36.933zm1.37.71a7.01 7.01 0 0 0-.439-.27l.493-.87a8.025 8.025 0 0 1 .979.654l-.615.789a6.996 6.996 0 0 0-.418-.302zm1.834 1.79a6.99 6.99 0 0 0-.653-.796l.724-.69c.27.285.52.59.747.91l-.818.576zm.744 1.352a7.08 7.08 0 0 0-.214-.468l.893-.45a7.976 7.976 0 0 1 .45 1.088l-.95.313a7.023 7.023 0 0 0-.179-.483zm.53 2.507a6.991 6.991 0 0 0-.1-1.025l.985-.17c.067.386.106.778.116 1.17l-1 .025zm-.131 1.538c.033-.17.06-.339.081-.51l.993.123a7.957 7.957 0 0 1-.23 1.155l-.964-.267c.046-.165.086-.332.12-.501zm-.952 2.379c.184-.29.346-.594.486-.908l.914.405c-.16.36-.345.706-.555 1.038l-.845-.535zm-.964 1.205c.122-.122.239-.248.35-.378l.758.653a8.073 8.073 0 0 1-.401.432l-.707-.707z"/>
+                                        <path d="M8 1a7 7 0 1 0 4.95 11.95l.707.707A8.001 8.001 0 1 1 8 0v1z"/>
+                                        <path d="M7.5 3a.5.5 0 0 1 .5.5v5.21l3.248 1.856a.5.5 0 0 1-.496.868l-3.5-2A.5.5 0 0 1 7 9V3.5a.5.5 0 0 1 .5-.5z"/>
+                                    </svg>
+                                </div>
+                                <div class="kpi-label">Transferências (30d)</div>
+                                <div class="kpi-value text-primary"><?php echo esc($dashboard_stats['transferencias_mes']); ?></div>
+                                <div class="kpi-footer">
+                                    Último mês
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal Adicionar Celular -->
