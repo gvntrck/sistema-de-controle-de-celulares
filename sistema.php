@@ -14,6 +14,122 @@ require_once __DIR__ . '/wp-load.php';
 /** @var wpdb $wpdb */
 global $wpdb;
 
+// --- Verificar autenticação ---
+if (!is_user_logged_in()) {
+    // Processar login se formulário foi enviado
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_submit'])) {
+        $username = sanitize_user($_POST['username'] ?? '');
+        $password = $_POST['password'] ?? '';
+        
+        $user = wp_signon([
+            'user_login' => $username,
+            'user_password' => $password,
+            'remember' => true
+        ], false);
+        
+        if (is_wp_error($user)) {
+            $login_error = 'Usuário ou senha incorretos.';
+        } else {
+            wp_set_current_user($user->ID);
+            wp_set_auth_cookie($user->ID, true);
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
+    }
+    
+    // Exibir formulário de login
+    ?>
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+        <meta charset="utf-8">
+        <title>Login - Controle de Celulares</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .login-card {
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                padding: 40px;
+                max-width: 400px;
+                width: 100%;
+            }
+            .login-header {
+                text-align: center;
+                margin-bottom: 30px;
+            }
+            .login-header h1 {
+                color: #333;
+                font-size: 24px;
+                font-weight: 600;
+                margin-bottom: 10px;
+            }
+            .login-header p {
+                color: #666;
+                font-size: 14px;
+            }
+            .btn-login {
+                width: 100%;
+                padding: 12px;
+                font-weight: 600;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border: none;
+            }
+            .btn-login:hover {
+                background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-card">
+            <div class="login-header">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#667eea" viewBox="0 0 16 16">
+                    <path d="M11 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h6zM5 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H5z"/>
+                    <path d="M8 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
+                </svg>
+                <h1>Controle de Celulares</h1>
+                <p>Faça login para acessar o sistema</p>
+            </div>
+            
+            <?php if (isset($login_error)): ?>
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Erro!</strong> <?php echo esc_html($login_error); ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="">
+                <div class="mb-3">
+                    <label for="username" class="form-label">Usuário</label>
+                    <input type="text" class="form-control" id="username" name="username" required autofocus>
+                </div>
+                <div class="mb-4">
+                    <label for="password" class="form-label">Senha</label>
+                    <input type="password" class="form-control" id="password" name="password" required>
+                </div>
+                <button type="submit" name="login_submit" class="btn btn-primary btn-login">
+                    Entrar
+                </button>
+            </form>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+// Usuário autenticado - continuar com o sistema
+$current_user = wp_get_current_user();
+
 // --- Configurações básicas ---
 $prefix = $wpdb->prefix;
 $tables = (object) [
@@ -1020,7 +1136,20 @@ $data = fetch_rows();
     
     <header class="d-flex align-items-center justify-content-between mb-3">
         <h1 class="h4 m-0">Controle de Celulares</h1>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center">
+            <span class="badge bg-secondary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle;">
+                    <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/>
+                </svg>
+                <?php echo esc($current_user->display_name); ?>
+            </span>
+            <a href="<?php echo wp_logout_url($_SERVER['PHP_SELF']); ?>" class="btn btn-outline-danger btn-sm" title="Sair">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                    <path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/>
+                    <path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/>
+                </svg>
+                Sair
+            </a>
             <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAdicionarCelular">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
                     <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>
