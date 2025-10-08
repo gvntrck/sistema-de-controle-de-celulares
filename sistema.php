@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.2.0
+ * Version: 1.3.0
  */
 
 declare(strict_types=1);
@@ -237,6 +237,108 @@ function handle_ajax(): void {
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
     }
+    
+    // Buscar dados do celular para edição
+    if ($_GET['action'] === 'buscar_celular') {
+        $celular_id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+        
+        $q = "
+            SELECT
+                c.id,
+                c.marca,
+                c.modelo,
+                c.status,
+                c.colaborador AS colaborador_id,
+                col.nome,
+                col.sobrenome,
+                col.matricula,
+                imei.meta_value   AS imei,
+                serial.meta_value AS serial_number,
+                aquisicao.meta_value AS data_aquisicao,
+                entrega.meta_value AS data_entrega
+            FROM {$tables->celulares} c
+            LEFT JOIN {$tables->colaboradores} col
+                ON col.id = c.colaborador
+            LEFT JOIN {$tables->celulares_meta} imei
+                ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+            LEFT JOIN {$tables->celulares_meta} serial
+                ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+            LEFT JOIN {$tables->celulares_meta} aquisicao
+                ON aquisicao.celular_id = c.id AND aquisicao.meta_key = 'data_aquisicao'
+            LEFT JOIN {$tables->celulares_meta} entrega
+                ON entrega.celular_id = c.id AND entrega.meta_key = 'data_entrega'
+            WHERE c.id = %d
+        ";
+        
+        $celular = $wpdb->get_row($wpdb->prepare($q, $celular_id), ARRAY_A);
+        
+        if ($celular) {
+            echo json_encode(['success' => true, 'data' => $celular]);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Celular não encontrado']);
+        }
+        exit;
+    }
+    
+    // Atualizar celular
+    if ($_GET['action'] === 'atualizar_celular' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $input = json_decode(file_get_contents('php://input'), true);
+        $celular_id = isset($input['celular_id']) ? (int) $input['celular_id'] : 0;
+        
+        if (!$celular_id) {
+            echo json_encode(['success' => false, 'message' => 'ID do celular inválido']);
+            exit;
+        }
+        
+        $colaborador_id = !empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null;
+        
+        // Atualizar dados principais do celular
+        $wpdb->update(
+            $tables->celulares,
+            [
+                'marca' => sanitize_text_field($input['marca']),
+                'modelo' => sanitize_text_field($input['modelo']),
+                'colaborador' => $colaborador_id,
+                'status' => sanitize_text_field($input['status'])
+            ],
+            ['id' => $celular_id]
+        );
+        
+        // Atualizar ou inserir metas
+        $metas = [
+            'imei' => $input['imei'] ?? '',
+            'serial number' => $input['serial_number'] ?? '',
+            'data_aquisicao' => $input['data_aquisicao'] ?? '',
+            'data_entrega' => $input['data_entrega'] ?? ''
+        ];
+        
+        foreach ($metas as $key => $value) {
+            if (!empty($value)) {
+                $exists = $wpdb->get_var($wpdb->prepare(
+                    "SELECT id FROM {$tables->celulares_meta} WHERE celular_id = %d AND meta_key = %s",
+                    $celular_id,
+                    $key
+                ));
+                
+                if ($exists) {
+                    $wpdb->update(
+                        $tables->celulares_meta,
+                        ['meta_value' => sanitize_text_field($value)],
+                        ['celular_id' => $celular_id, 'meta_key' => $key]
+                    );
+                } else {
+                    $wpdb->insert($tables->celulares_meta, [
+                        'celular_id' => $celular_id,
+                        'meta_key' => $key,
+                        'meta_value' => sanitize_text_field($value)
+                    ]);
+                }
+            }
+        }
+        
+        echo json_encode(['success' => true, 'celular_id' => $celular_id]);
+        exit;
+    }
 }
 
 // --- Inicialização do schema ---
@@ -332,6 +434,7 @@ $data = fetch_rows();
                     <th>Matrícula</th>
                     <th>Setor</th>
                     <th>Local</th>
+                    <th>Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -360,10 +463,17 @@ $data = fetch_rows();
                         <td><?php echo esc($r['matricula'] ?? ''); ?></td>
                         <td><?php echo esc($r['setor'] ?? ''); ?></td>
                         <td><?php echo esc($r['local_trabalho'] ?? ''); ?></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary btn-editar" data-id="<?php echo esc($r['id']); ?>" title="Editar">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
+                                </svg>
+                            </button>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             <?php else: ?>
-                <tr><td colspan="10" class="text-center text-muted">Nenhum registro.</td></tr>
+                <tr><td colspan="11" class="text-center text-muted">Nenhum registro.</td></tr>
             <?php endif; ?>
             </tbody>
         </table>
@@ -377,6 +487,7 @@ $data = fetch_rows();
                     <h5 class="modal-title" id="modalAdicionarCelularLabel">Adicionar Celular</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
+                <input type="hidden" id="celular_id_edit" name="celular_id_edit">
                 <div class="modal-body">
                     <form id="formAdicionarCelular">
                         <div class="row">
@@ -595,10 +706,19 @@ $data = fetch_rows();
             }
         });
         
+        const celularIdEdit = document.getElementById('celular_id_edit').value;
+        const isEdit = !!celularIdEdit;
+        
+        if (isEdit) {
+            data.celular_id = celularIdEdit;
+        }
+        
         btnSalvar.disabled = true;
         btnSalvar.textContent = 'Salvando...';
         
-        fetch('?action=salvar_celular', {
+        const action = isEdit ? 'atualizar_celular' : 'salvar_celular';
+        
+        fetch(`?action=${action}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -608,7 +728,7 @@ $data = fetch_rows();
         .then(res => res.json())
         .then(result => {
             if (result.success) {
-                alert('Celular adicionado com sucesso!');
+                alert(isEdit ? 'Celular atualizado com sucesso!' : 'Celular adicionado com sucesso!');
                 location.reload();
             } else {
                 alert('Erro ao salvar celular');
@@ -628,6 +748,8 @@ $data = fetch_rows();
     document.getElementById('modalAdicionarCelular').addEventListener('hidden.bs.modal', function() {
         form.reset();
         colaboradorIdInput.value = '';
+        document.getElementById('celular_id_edit').value = '';
+        document.getElementById('modalAdicionarCelularLabel').textContent = 'Adicionar Celular';
         listaDiv.style.display = 'none';
         statusBusca.style.display = 'none';
         camposNovoColab.style.display = 'none';
@@ -637,6 +759,51 @@ $data = fetch_rows();
         btnSalvar.textContent = 'Salvar';
     });
 })();
+
+// Editar celular
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.btn-editar')) {
+        const btn = e.target.closest('.btn-editar');
+        const celularId = btn.dataset.id;
+        
+        fetch(`?action=buscar_celular&id=${celularId}`)
+            .then(res => res.json())
+            .then(result => {
+                if (result.success && result.data) {
+                    const d = result.data;
+                    
+                    // Preencher campos
+                    document.getElementById('celular_id_edit').value = d.id;
+                    document.getElementById('marca').value = d.marca || '';
+                    document.getElementById('modelo').value = d.modelo || '';
+                    document.getElementById('imei').value = d.imei || '';
+                    document.getElementById('serial_number').value = d.serial_number || '';
+                    document.getElementById('data_aquisicao').value = d.data_aquisicao || '';
+                    document.getElementById('data_entrega').value = d.data_entrega || '';
+                    document.getElementById('status').value = d.status || 'disponivel';
+                    
+                    // Preencher colaborador se existir
+                    if (d.colaborador_id) {
+                        document.getElementById('colaborador_id').value = d.colaborador_id;
+                        document.getElementById('busca_colaborador').value = `${d.nome || ''} ${d.sobrenome || ''}`.trim();
+                    }
+                    
+                    // Alterar título do modal
+                    document.getElementById('modalAdicionarCelularLabel').textContent = 'Editar Celular';
+                    
+                    // Abrir modal
+                    const modal = new bootstrap.Modal(document.getElementById('modalAdicionarCelular'));
+                    modal.show();
+                } else {
+                    alert('Erro ao carregar dados do celular');
+                }
+            })
+            .catch(err => {
+                console.error('Erro:', err);
+                alert('Erro ao carregar dados do celular');
+            });
+    }
+});
 </script>
 </body>
 </html>
