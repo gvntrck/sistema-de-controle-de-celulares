@@ -1021,7 +1021,7 @@ $data = fetch_rows();
                 Adicionar Celular
             </button>
             <input id="search" type="search" class="form-control form-control-sm search-input" placeholder="Pesquisar...">
-            <span class="chip">Tabelas: <?php echo esc($tables->celulares); ?>, <?php echo esc($tables->celulares_meta); ?>, <?php echo esc($tables->colaboradores); ?>, <?php echo esc($tables->colaboradores_meta); ?></span>
+            <span class="chip">Tabelas: <?php echo esc($tables->celulares); ?>, <?php echo esc($tables->celulares_meta); ?>, <?php echo esc($tables->colaboradores); ?>, <?php echo esc($tables->colaboradores_meta); ?>, <?php echo esc($tables->transferencias); ?></span>
         </div>
     </header>
 
