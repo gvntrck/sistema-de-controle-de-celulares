@@ -1687,14 +1687,14 @@ $dashboard_stats = fetch_dashboard_stats();
                     <div class="row g-3 mt-2">
                         <!-- Perdidos -->
                         <div class="col-12 col-sm-6 col-lg-3">
-                            <div class="kpi-card" style="background: #fff3cd; border-left: 4px solid #ffc107;">
-                                <div class="kpi-icon" style="background: #ffc107; color: white;">
+                            <div class="kpi-card warning">
+                                <div class="kpi-icon warning">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                         <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
                                     </svg>
                                 </div>
                                 <div class="kpi-label">Perdidos</div>
-                                <div class="kpi-value" style="color: #ffc107;"><?php echo esc($dashboard_stats['perdido']); ?></div>
+                                <div class="kpi-value text-warning"><?php echo esc($dashboard_stats['perdido']); ?></div>
                                 <div class="kpi-footer">
                                     Extraviados
                                 </div>
@@ -1703,14 +1703,14 @@ $dashboard_stats = fetch_dashboard_stats();
                         
                         <!-- Roubados -->
                         <div class="col-12 col-sm-6 col-lg-3">
-                            <div class="kpi-card" style="background: #f8d7da; border-left: 4px solid #dc3545;">
-                                <div class="kpi-icon" style="background: #dc3545; color: white;">
+                            <div class="kpi-card danger">
+                                <div class="kpi-icon danger">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                         <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
                                     </svg>
                                 </div>
                                 <div class="kpi-label">Roubados</div>
-                                <div class="kpi-value" style="color: #dc3545;"><?php echo esc($dashboard_stats['roubado']); ?></div>
+                                <div class="kpi-value text-danger"><?php echo esc($dashboard_stats['roubado']); ?></div>
                                 <div class="kpi-footer">
                                     Requer B.O.
                                 </div>
@@ -1719,15 +1719,15 @@ $dashboard_stats = fetch_dashboard_stats();
                         
                         <!-- Descartados -->
                         <div class="col-12 col-sm-6 col-lg-3">
-                            <div class="kpi-card" style="background: #e2e3e5; border-left: 4px solid #6c757d;">
-                                <div class="kpi-icon" style="background: #6c757d; color: white;">
+                            <div class="kpi-card secondary">
+                                <div class="kpi-icon secondary">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                         <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
                                         <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
                                     </svg>
                                 </div>
                                 <div class="kpi-label">Descartados</div>
-                                <div class="kpi-value" style="color: #6c757d;"><?php echo esc($dashboard_stats['descartado']); ?></div>
+                                <div class="kpi-value text-secondary"><?php echo esc($dashboard_stats['descartado']); ?></div>
                                 <div class="kpi-footer">
                                     Baixados do patrimônio
                                 </div>
@@ -1736,14 +1736,14 @@ $dashboard_stats = fetch_dashboard_stats();
                         
                         <!-- Total Geral -->
                         <div class="col-12 col-sm-6 col-lg-3">
-                            <div class="kpi-card" style="background: #d1ecf1; border-left: 4px solid #0dcaf0;">
-                                <div class="kpi-icon" style="background: #0dcaf0; color: white;">
+                            <div class="kpi-card info">
+                                <div class="kpi-icon info">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                                         <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM8 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm.256 7a4.474 4.474 0 0 1-.229-1.004H3c.001-.246.154-.986.832-1.664C4.484 10.68 5.711 10 8 10c.26 0 .507.009.74.025.226-.341.496-.65.804-.918C9.077 9.038 8.564 9 8 9c-5 0-6 3-6 4s1 1 1 1h5.256Zm3.63-4.54c.18-.613 1.048-.613 1.229 0l.043.148a.64.64 0 0 0 .921.382l.136-.074c.561-.306 1.175.308.87.869l-.075.136a.64.64 0 0 0 .382.92l.149.045c.612.18.612 1.048 0 1.229l-.15.043a.64.64 0 0 0-.38.921l.074.136c.305.561-.309 1.175-.87.87l-.136-.075a.64.64 0 0 0-.92.382l-.045.149c-.18.612-1.048.612-1.229 0l-.043-.15a.64.64 0 0 0-.921-.38l-.136.074c-.561.305-1.175-.309-.87-.87l.075-.136a.64.64 0 0 0-.382-.92l-.148-.045c-.613-.18-.613-1.048 0-1.229l.148-.043a.64.64 0 0 0 .382-.921l-.074-.136c-.306-.561.308-1.175.869-.87l.136.075a.64.64 0 0 0 .92-.382l.045-.148ZM14 12.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z"/>
                                     </svg>
                                 </div>
                                 <div class="kpi-label">Total de Celulares</div>
-                                <div class="kpi-value" style="color: #0dcaf0;"><?php echo esc($dashboard_stats['total']); ?></div>
+                                <div class="kpi-value text-info"><?php echo esc($dashboard_stats['total']); ?></div>
                                 <div class="kpi-footer">
                                     Todos os registros
                                 </div>
