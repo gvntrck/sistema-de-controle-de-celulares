@@ -812,9 +812,16 @@ function handle_ajax(): void {
         ));
         
         // Determinar colaborador (novo ou existente)
-        $colaborador_id = !empty($input['novo_colaborador']) 
-            ? criar_colaborador($input) 
-            : (!empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null);
+        // Se novo_colaborador está marcado, criar novo
+        // Se colaborador_id está presente e não vazio, usar ele
+        // Caso contrário, null (sem colaborador - devolução)
+        if (!empty($input['novo_colaborador'])) {
+            $colaborador_id = criar_colaborador($input);
+        } elseif (isset($input['colaborador_id']) && $input['colaborador_id'] !== '' && $input['colaborador_id'] !== null) {
+            $colaborador_id = (int) $input['colaborador_id'];
+        } else {
+            $colaborador_id = null;
+        }
         
         // Atualizar dados principais do celular
         $wpdb->update(
@@ -1351,6 +1358,14 @@ $data = fetch_rows();
         const termo = this.value.trim();
         
         clearTimeout(timeoutBusca);
+        
+        // Se o campo foi limpo, limpar o colaborador_id também
+        if (termo.length === 0) {
+            colaboradorIdInput.value = '';
+            listaDiv.style.display = 'none';
+            statusBusca.style.display = 'none';
+            return;
+        }
         
         if (termo.length < 2) {
             listaDiv.style.display = 'none';
