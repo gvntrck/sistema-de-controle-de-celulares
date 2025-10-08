@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.1.0
+ * Version: 1.2.0
  */
 
 declare(strict_types=1);
@@ -219,6 +219,20 @@ function handle_ajax(): void {
                 'meta_value' => sanitize_text_field($input['serial_number'])
             ]);
         }
+        if (!empty($input['data_aquisicao'])) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => 'data_aquisicao',
+                'meta_value' => sanitize_text_field($input['data_aquisicao'])
+            ]);
+        }
+        if (!empty($input['data_entrega'])) {
+            $wpdb->insert($tables->celulares_meta, [
+                'celular_id' => $celular_id,
+                'meta_key' => 'data_entrega',
+                'meta_value' => sanitize_text_field($input['data_entrega'])
+            ]);
+        }
         
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
@@ -383,6 +397,16 @@ $data = fetch_rows();
                             <div class="col-md-6 mb-3">
                                 <label for="serial_number" class="form-label">Serial Number</label>
                                 <input type="text" class="form-control" id="serial_number" name="serial_number">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="data_aquisicao" class="form-label">Data de Aquisição</label>
+                                <input type="date" class="form-control" id="data_aquisicao" name="data_aquisicao">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="data_entrega" class="form-label">Data de Entrega ao Colaborador</label>
+                                <input type="date" class="form-control" id="data_entrega" name="data_entrega">
                             </div>
                         </div>
                         <div class="mb-3">
