@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 1.9.0
+ * Version: 2.0.0
  */
 
 declare(strict_types=1);
@@ -119,6 +119,7 @@ $tables = (object) [
     'colaboradores'      => $prefix . 'colaboradores',
     'colaboradores_meta' => $prefix . 'colaboradores_meta',
     'transferencias'     => $prefix . 'celulares_transferencias',
+    'auditoria'          => $prefix . 'celulares_auditoria',
 ];
 
 // --- Helpers mínimos ---
@@ -202,6 +203,26 @@ function ensure_schema(): void {
             REFERENCES {$tables->colaboradores}(id) ON DELETE SET NULL
     ) " . collate() . ";";
 
+    $sql[] = "CREATE TABLE IF NOT EXISTS {$tables->auditoria} (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        usuario_id BIGINT UNSIGNED NULL,
+        usuario_nome VARCHAR(191) NOT NULL,
+        acao VARCHAR(50) NOT NULL,
+        tabela VARCHAR(50) NOT NULL,
+        registro_id BIGINT UNSIGNED NULL,
+        dados_anteriores LONGTEXT NULL,
+        dados_novos LONGTEXT NULL,
+        ip_address VARCHAR(45) NULL,
+        user_agent VARCHAR(255) NULL,
+        data_hora DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY idx_usuario (usuario_id),
+        KEY idx_acao (acao),
+        KEY idx_tabela (tabela),
+        KEY idx_registro (registro_id),
+        KEY idx_data (data_hora)
+    ) " . collate() . ";";
+
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     foreach ($sql as $q) {
         $wpdb->query($q); // idempotente com IF NOT EXISTS
@@ -210,6 +231,46 @@ function ensure_schema(): void {
     // Garante chaves importantes de meta iniciais no comentário abaixo.
     // celulares_meta padrão: imei, serial number
     // colaboradores_meta padrão: setor, local
+}
+
+/**
+ * Registra ação de auditoria no sistema
+ */
+function registrar_auditoria(string $acao, string $tabela, ?int $registro_id = null, ?array $dados_anteriores = null, ?array $dados_novos = null): void {
+    global $wpdb, $tables, $current_user;
+    
+    $usuario_id = $current_user->ID ?? null;
+    $usuario_nome = $current_user->display_name ?? 'Sistema';
+    
+    // Capturar IP do usuário
+    $ip_address = $_SERVER['REMOTE_ADDR'] ?? null;
+    if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ip_address = $_SERVER['HTTP_X_FORWARDED_FOR'];
+    }
+    
+    // Capturar User Agent
+    $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+    if ($user_agent && strlen($user_agent) > 255) {
+        $user_agent = substr($user_agent, 0, 255);
+    }
+    
+    // Preparar dados para JSON
+    $dados_ant_json = $dados_anteriores ? wp_json_encode($dados_anteriores, JSON_UNESCAPED_UNICODE) : null;
+    $dados_nov_json = $dados_novos ? wp_json_encode($dados_novos, JSON_UNESCAPED_UNICODE) : null;
+    
+    // Inserir log de auditoria
+    $wpdb->insert($tables->auditoria, [
+        'usuario_id' => $usuario_id,
+        'usuario_nome' => $usuario_nome,
+        'acao' => $acao,
+        'tabela' => $tabela,
+        'registro_id' => $registro_id,
+        'dados_anteriores' => $dados_ant_json,
+        'dados_novos' => $dados_nov_json,
+        'ip_address' => $ip_address,
+        'user_agent' => $user_agent,
+        'data_hora' => current_time('mysql')
+    ]);
 }
 
 /**
@@ -341,11 +402,13 @@ function criar_colaborador(array $input): ?int {
         return null;
     }
     
-    $wpdb->insert($tables->colaboradores, [
+    $dados_colaborador = [
         'nome' => sanitize_text_field($input['colaborador_nome']),
         'sobrenome' => sanitize_text_field($input['colaborador_sobrenome']),
         'matricula' => sanitize_text_field($input['colaborador_matricula'])
-    ]);
+    ];
+    
+    $wpdb->insert($tables->colaboradores, $dados_colaborador);
     
     $colaborador_id = (int) $wpdb->insert_id;
     
@@ -356,6 +419,7 @@ function criar_colaborador(array $input): ?int {
             'meta_key' => 'setor',
             'meta_value' => sanitize_text_field($input['colaborador_setor'])
         ]);
+        $dados_colaborador['setor'] = sanitize_text_field($input['colaborador_setor']);
     }
     
     if (!empty($input['colaborador_local'])) {
@@ -364,7 +428,11 @@ function criar_colaborador(array $input): ?int {
             'meta_key' => 'local',
             'meta_value' => sanitize_text_field($input['colaborador_local'])
         ]);
+        $dados_colaborador['local'] = sanitize_text_field($input['colaborador_local']);
     }
+    
+    // Registrar auditoria
+    registrar_auditoria('criar', 'colaboradores', $colaborador_id, null, $dados_colaborador);
     
     return $colaborador_id;
 }
@@ -907,17 +975,29 @@ function handle_ajax(): void {
             ? criar_colaborador($input) 
             : (!empty($input['colaborador_id']) ? (int) $input['colaborador_id'] : null);
         
-        // Inserir celular
-        $wpdb->insert($tables->celulares, [
+        // Preparar dados do celular
+        $dados_celular = [
             'marca' => sanitize_text_field($input['marca']),
             'modelo' => sanitize_text_field($input['modelo']),
             'colaborador' => $colaborador_id,
             'status' => sanitize_text_field($input['status'])
-        ]);
+        ];
+        
+        // Inserir celular
+        $wpdb->insert($tables->celulares, $dados_celular);
         $celular_id = (int) $wpdb->insert_id;
+        
+        // Adicionar metas aos dados para auditoria
+        $dados_celular['id'] = $celular_id;
+        $dados_celular['imei'] = $input['imei'] ?? '';
+        $dados_celular['serial_number'] = $input['serial_number'] ?? '';
+        $dados_celular['propriedade'] = $input['propriedade'] ?? '';
         
         // Salvar metas do celular
         salvar_metas_celular($celular_id, $input);
+        
+        // Registrar auditoria
+        registrar_auditoria('criar', 'celulares', $celular_id, null, $dados_celular);
         
         echo json_encode(['success' => true, 'celular_id' => $celular_id]);
         exit;
@@ -984,11 +1064,21 @@ function handle_ajax(): void {
             exit;
         }
         
-        // Buscar colaborador atual antes da atualização
-        $colaborador_anterior = $wpdb->get_var($wpdb->prepare(
-            "SELECT colaborador FROM {$tables->celulares} WHERE id = %d",
+        // Buscar dados anteriores do celular para auditoria
+        $dados_anteriores = $wpdb->get_row($wpdb->prepare(
+            "SELECT c.*, 
+                   imei.meta_value AS imei,
+                   serial.meta_value AS serial_number,
+                   prop.meta_value AS propriedade
+            FROM {$tables->celulares} c
+            LEFT JOIN {$tables->celulares_meta} imei ON imei.celular_id = c.id AND imei.meta_key = 'imei'
+            LEFT JOIN {$tables->celulares_meta} serial ON serial.celular_id = c.id AND serial.meta_key = 'serial number'
+            LEFT JOIN {$tables->celulares_meta} prop ON prop.celular_id = c.id AND prop.meta_key = 'propriedade'
+            WHERE c.id = %d",
             $celular_id
-        ));
+        ), ARRAY_A);
+        
+        $colaborador_anterior = $dados_anteriores['colaborador'] ?? null;
         
         // Determinar colaborador (novo ou existente)
         // Se novo_colaborador está marcado, criar novo
@@ -1002,20 +1092,35 @@ function handle_ajax(): void {
             $colaborador_id = null;
         }
         
+        // Preparar dados novos
+        $dados_novos = [
+            'id' => $celular_id,
+            'marca' => sanitize_text_field($input['marca']),
+            'modelo' => sanitize_text_field($input['modelo']),
+            'colaborador' => $colaborador_id,
+            'status' => sanitize_text_field($input['status']),
+            'imei' => $input['imei'] ?? '',
+            'serial_number' => $input['serial_number'] ?? '',
+            'propriedade' => $input['propriedade'] ?? ''
+        ];
+        
         // Atualizar dados principais do celular
         $wpdb->update(
             $tables->celulares,
             [
-                'marca' => sanitize_text_field($input['marca']),
-                'modelo' => sanitize_text_field($input['modelo']),
+                'marca' => $dados_novos['marca'],
+                'modelo' => $dados_novos['modelo'],
                 'colaborador' => $colaborador_id,
-                'status' => sanitize_text_field($input['status'])
+                'status' => $dados_novos['status']
             ],
             ['id' => $celular_id]
         );
         
         // Atualizar ou inserir metas
         upsert_metas_celular($celular_id, $input);
+        
+        // Registrar auditoria
+        registrar_auditoria('atualizar', 'celulares', $celular_id, $dados_anteriores, $dados_novos);
         
         // Verificar se houve mudança de colaborador
         $transferencia_id = null;
@@ -1115,6 +1220,43 @@ function handle_ajax(): void {
         } else {
             echo json_encode(['success' => true, 'disponivel' => true]);
         }
+        exit;
+    }
+    
+    // Buscar logs de auditoria
+    if ($_GET['action'] === 'buscar_auditoria') {
+        $tabela = isset($_GET['tabela']) ? sanitize_text_field($_GET['tabela']) : '';
+        $registro_id = isset($_GET['registro_id']) ? (int) $_GET['registro_id'] : 0;
+        $limite = isset($_GET['limite']) ? (int) $_GET['limite'] : 50;
+        
+        $where = [];
+        $params = [];
+        
+        if (!empty($tabela)) {
+            $where[] = "tabela = %s";
+            $params[] = $tabela;
+        }
+        
+        if ($registro_id > 0) {
+            $where[] = "registro_id = %d";
+            $params[] = $registro_id;
+        }
+        
+        $where_clause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+        
+        $query = "
+            SELECT *
+            FROM {$tables->auditoria}
+            {$where_clause}
+            ORDER BY data_hora DESC
+            LIMIT %d
+        ";
+        
+        $params[] = $limite;
+        
+        $logs = $wpdb->get_results($wpdb->prepare($query, ...$params), ARRAY_A);
+        
+        echo json_encode(['success' => true, 'data' => $logs]);
         exit;
     }
 }
@@ -1271,6 +1413,12 @@ $dashboard_stats = fetch_dashboard_stats();
                     <path d="M1 0a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1H1zm0 7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H1zm9-7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V1a1 1 0 0 0-1-1h-5zm0 7a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-5z"/>
                 </svg>
                 Dashboard
+            </button>
+            <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#modalAuditoria">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zM8 1.918l-.797.161A4.002 4.002 0 0 0 4 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4.002 4.002 0 0 0-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 1 1 1.99 0A5.002 5.002 0 0 1 13 6c0 .88.32 4.2 1.22 6z"/>
+                </svg>
+                Auditoria
             </button>
             <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalAdicionarCelular">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
@@ -1687,6 +1835,78 @@ $dashboard_stats = fetch_dashboard_stats();
             </div>
         </div>
     </div>
+
+    <!-- Modal Auditoria -->
+    <div class="modal fade" id="modalAuditoria" tabindex="-1" aria-labelledby="modalAuditoriaLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title" id="modalAuditoriaLabel">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle; margin-right: 8px;">
+                            <path d="M8 16a2 2 0 0 0 2-2H6a2 2 0 0 0 2 2zM8 1.918l-.797.161A4.002 4.002 0 0 0 4 6c0 .628-.134 2.197-.459 3.742-.16.767-.376 1.566-.663 2.258h10.244c-.287-.692-.502-1.49-.663-2.258C12.134 8.197 12 6.628 12 6a4.002 4.002 0 0 0-3.203-3.92L8 1.917zM14.22 12c.223.447.481.801.78 1H1c.299-.199.557-.553.78-1C2.68 10.2 3 6.88 3 6c0-2.42 1.72-4.44 4.005-4.901a1 1 0 1 1 1.99 0A5.002 5.002 0 0 1 13 6c0 .88.32 4.2 1.22 6z"/>
+                        </svg>
+                        Logs de Auditoria - Rastreabilidade Completa
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body" style="background: #f8f9fa;">
+                    <!-- Filtros -->
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label for="filtro_tabela" class="form-label">Tabela</label>
+                                    <select class="form-select form-select-sm" id="filtro_tabela">
+                                        <option value="">Todas</option>
+                                        <option value="celulares">Celulares</option>
+                                        <option value="colaboradores">Colaboradores</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="filtro_acao" class="form-label">Ação</label>
+                                    <select class="form-select form-select-sm" id="filtro_acao">
+                                        <option value="">Todas</option>
+                                        <option value="criar">Criar</option>
+                                        <option value="atualizar">Atualizar</option>
+                                        <option value="excluir">Excluir</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="filtro_limite" class="form-label">Limite</label>
+                                    <select class="form-select form-select-sm" id="filtro_limite">
+                                        <option value="50">50 registros</option>
+                                        <option value="100">100 registros</option>
+                                        <option value="200">200 registros</option>
+                                        <option value="500">500 registros</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-primary btn-sm" id="btnFiltrarAuditoria">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M6 10.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
+                                    </svg>
+                                    Filtrar
+                                </button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btnLimparFiltros">Limpar Filtros</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="auditoria-loading" class="text-center py-4" style="display:none;">
+                        <div class="spinner-border text-warning" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Carregando logs de auditoria...</p>
+                    </div>
+                    <div id="auditoria-conteudo"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
    
 </div>
 
@@ -2086,6 +2306,142 @@ document.addEventListener('click', function(e) {
             });
     }
 });
+
+// Sistema de Auditoria
+(function() {
+    const modalAuditoria = document.getElementById('modalAuditoria');
+    const btnFiltrar = document.getElementById('btnFiltrarAuditoria');
+    const btnLimpar = document.getElementById('btnLimparFiltros');
+    const loading = document.getElementById('auditoria-loading');
+    const conteudo = document.getElementById('auditoria-conteudo');
+    
+    function carregarAuditoria() {
+        const tabela = document.getElementById('filtro_tabela').value;
+        const acao = document.getElementById('filtro_acao').value;
+        const limite = document.getElementById('filtro_limite').value;
+        
+        let url = '?action=buscar_auditoria';
+        const params = [];
+        
+        if (tabela) params.push(`tabela=${encodeURIComponent(tabela)}`);
+        if (limite) params.push(`limite=${encodeURIComponent(limite)}`);
+        
+        if (params.length > 0) {
+            url += '&' + params.join('&');
+        }
+        
+        loading.style.display = 'block';
+        conteudo.innerHTML = '';
+        
+        fetch(url)
+            .then(res => res.json())
+            .then(result => {
+                loading.style.display = 'none';
+                
+                if (result.success && result.data && result.data.length > 0) {
+                    let logs = result.data;
+                    
+                    // Filtrar por ação no frontend (já que o backend não filtra)
+                    if (acao) {
+                        logs = logs.filter(log => log.acao === acao);
+                    }
+                    
+                    if (logs.length === 0) {
+                        conteudo.innerHTML = '<div class="alert alert-info">Nenhum log encontrado com os filtros selecionados.</div>';
+                        return;
+                    }
+                    
+                    let html = '<div class="accordion" id="accordionAuditoria">';
+                    
+                    logs.forEach((log, index) => {
+                        const data = new Date(log.data_hora).toLocaleString('pt-BR');
+                        const acaoBadge = log.acao === 'criar' ? 'success' : (log.acao === 'atualizar' ? 'warning' : 'danger');
+                        const tabelaBadge = log.tabela === 'celulares' ? 'primary' : 'info';
+                        
+                        html += `
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="heading${index}">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                                    <div class="d-flex w-100 justify-content-between align-items-center pe-3">
+                                        <div>
+                                            <span class="badge bg-${acaoBadge} me-2">${log.acao.toUpperCase()}</span>
+                                            <span class="badge bg-${tabelaBadge} me-2">${log.tabela}</span>
+                                            <strong>${log.usuario_nome}</strong>
+                                            ${log.registro_id ? `<span class="text-muted">- ID: ${log.registro_id}</span>` : ''}
+                                        </div>
+                                        <small class="text-muted">${data}</small>
+                                    </div>
+                                </button>
+                            </h2>
+                            <div id="collapse${index}" class="accordion-collapse collapse" data-bs-parent="#accordionAuditoria">
+                                <div class="accordion-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h6 class="text-muted">Informações</h6>
+                                            <ul class="list-unstyled">
+                                                <li><strong>Usuário:</strong> ${log.usuario_nome} ${log.usuario_id ? `(ID: ${log.usuario_id})` : ''}</li>
+                                                <li><strong>Ação:</strong> ${log.acao}</li>
+                                                <li><strong>Tabela:</strong> ${log.tabela}</li>
+                                                <li><strong>Registro ID:</strong> ${log.registro_id || 'N/A'}</li>
+                                                <li><strong>Data/Hora:</strong> ${data}</li>
+                                                <li><strong>IP:</strong> ${log.ip_address || 'N/A'}</li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6 class="text-muted">User Agent</h6>
+                                            <p class="small text-muted">${log.user_agent || 'N/A'}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    ${log.dados_anteriores ? `
+                                    <div class="mt-3">
+                                        <h6 class="text-danger">Dados Anteriores</h6>
+                                        <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;"><code>${JSON.stringify(JSON.parse(log.dados_anteriores), null, 2)}</code></pre>
+                                    </div>
+                                    ` : ''}
+                                    
+                                    ${log.dados_novos ? `
+                                    <div class="mt-3">
+                                        <h6 class="text-success">Dados Novos</h6>
+                                        <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;"><code>${JSON.stringify(JSON.parse(log.dados_novos), null, 2)}</code></pre>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    });
+                    
+                    html += '</div>';
+                    conteudo.innerHTML = html;
+                } else {
+                    conteudo.innerHTML = '<div class="alert alert-info">Nenhum log de auditoria encontrado.</div>';
+                }
+            })
+            .catch(err => {
+                loading.style.display = 'none';
+                conteudo.innerHTML = '<div class="alert alert-danger">Erro ao carregar logs de auditoria.</div>';
+                console.error('Erro:', err);
+            });
+    }
+    
+    // Carregar auditoria ao abrir modal
+    modalAuditoria.addEventListener('shown.bs.modal', function() {
+        carregarAuditoria();
+    });
+    
+    // Botão filtrar
+    btnFiltrar.addEventListener('click', function() {
+        carregarAuditoria();
+    });
+    
+    // Botão limpar filtros
+    btnLimpar.addEventListener('click', function() {
+        document.getElementById('filtro_tabela').value = '';
+        document.getElementById('filtro_acao').value = '';
+        document.getElementById('filtro_limite').value = '50';
+        carregarAuditoria();
+    });
+})();
 </script>
 </body>
 </html>
