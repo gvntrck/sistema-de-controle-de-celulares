@@ -3,7 +3,7 @@
  * Arquivo único: /celulares-admin.php
  * Coloque na raiz do WordPress. Requer wp-load.php.
  * MVP: lista celulares + metadados + dados do colaborador.
- * Version: 2.0.0
+ * Version: 2.1.0
  */
 
 declare(strict_types=1);
@@ -164,7 +164,7 @@ function ensure_schema(): void {
         marca VARCHAR(191) NOT NULL,
         modelo VARCHAR(191) NOT NULL,
         colaborador BIGINT UNSIGNED NULL, -- FK para colaboradores.id
-        status VARCHAR(50) NOT NULL DEFAULT 'disponivel', -- ex: disponivel, emprestado, manutencao, inativo, defeito
+        status VARCHAR(50) NOT NULL DEFAULT 'disponivel', -- ex: disponivel, emprestado, manutencao, inativo, defeito, perdido, roubado, descartado
         PRIMARY KEY (id),
         KEY idx_colaborador (colaborador),
         CONSTRAINT fk_cel_colab FOREIGN KEY (colaborador)
@@ -292,6 +292,9 @@ function fetch_dashboard_stats(): array {
         'manutencao' => 0,
         'defeito' => 0,
         'inativo' => 0,
+        'perdido' => 0,
+        'roubado' => 0,
+        'descartado' => 0,
         'total' => 0
     ];
     
@@ -1751,6 +1754,9 @@ $dashboard_stats = fetch_dashboard_stats();
                                 <option value="manutencao">Manutenção</option>
                                 <option value="defeito">Defeito</option>
                                 <option value="inativo">Inativo</option>
+                                <option value="perdido">Perdido</option>
+                                <option value="roubado">Roubado</option>
+                                <option value="descartado">Descartado</option>
                             </select>
                         </div>
                         <div class="mb-3">
