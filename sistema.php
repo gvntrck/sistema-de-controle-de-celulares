@@ -2,7 +2,6 @@
 /**
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
- * MVP: lista celulares + metadados + dados do colaborador.
  * Version: 2.3.1
  */
 
@@ -1348,7 +1347,7 @@ function handle_ajax(): void {
 ensure_schema();
 handle_ajax();
 
-// --- (Opcional) Semeadura mínima quando vazio para facilitar MVP ---
+// --- (Opcional) Semeadura mínima quando vazio para facilitar ---
 function seed_if_empty(): void {
     global $wpdb, $tables;
 
@@ -1393,7 +1392,7 @@ $dashboard_stats = fetch_dashboard_stats();
 <html lang="pt-br">
 <head>
     <meta charset="utf-8">
-    <title>Controle de Celulares - MVP</title>
+    <title>Controle de Celulares</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Bootstrap 5 via CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
