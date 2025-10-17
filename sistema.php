@@ -386,6 +386,21 @@ function fetch_status_unicos(): array {
     return $status ?: [];
 }
 
+function fetch_setores_unicos(): array {
+    global $wpdb, $tables;
+
+    $setores = $wpdb->get_col("
+        SELECT DISTINCT meta_value
+        FROM {$tables->colaboradores_meta}
+        WHERE meta_key = 'setor'
+          AND meta_value IS NOT NULL
+          AND meta_value != ''
+        ORDER BY meta_value ASC
+    ");
+
+    return $setores ?: [];
+}
+
 /**
  * Consulta principal: celulares + metadados + colaborador + metadados
  */
@@ -1537,24 +1552,9 @@ $dashboard_stats = fetch_dashboard_stats();
                 </svg>
                 <span>Adicionar Celular</span>
             </button>
-            <select id="filtro_modelo" class="form-select form-select-sm" style="max-width: 200px;">
-                <option value="">Todos os Modelos</option>
-                <?php
-                $modelos_unicos = fetch_modelos_unicos();
-                foreach ($modelos_unicos as $modelo) {
-                    echo '<option value="' . esc_attr($modelo) . '">' . esc($modelo) . '</option>';
-                }
-                ?>
-            </select>
-            <select id="filtro_status" class="form-select form-select-sm" style="max-width: 200px;">
-                <option value="">Todos os Status</option>
-                <?php
-                $status_unicos = fetch_status_unicos();
-                foreach ($status_unicos as $status) {
-                    echo '<option value="' . esc_attr($status) . '">' . esc($status) . '</option>';
-                }
-                ?>
-            </select>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modalFiltros">
+                Filtros
+            </button>
             <input id="search" type="search" class="form-control form-control-sm search-input" placeholder="Pesquisar...">
             <span class="badge bg-secondary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle;">
@@ -1571,6 +1571,59 @@ $dashboard_stats = fetch_dashboard_stats();
             </a>
         </div>
     </header>
+
+    <div class="modal fade" id="modalFiltros" tabindex="-1" aria-labelledby="modalFiltrosLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalFiltrosLabel">Filtros</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="filtro_modelo" class="form-label">Modelo</label>
+                        <select id="filtro_modelo" class="form-select">
+                            <option value="">Todos os Modelos</option>
+                            <?php
+                            $modelos_unicos = fetch_modelos_unicos();
+                            foreach ($modelos_unicos as $modelo) {
+                                echo '<option value="' . esc_attr($modelo) . '">' . esc($modelo) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="filtro_status" class="form-label">Status</label>
+                        <select id="filtro_status" class="form-select">
+                            <option value="">Todos os Status</option>
+                            <?php
+                            $status_unicos = fetch_status_unicos();
+                            foreach ($status_unicos as $status) {
+                                echo '<option value="' . esc_attr($status) . '">' . esc($status) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="filtro_setor" class="form-label">Setor</label>
+                        <select id="filtro_setor" class="form-select">
+                            <option value="">Todos os Setores</option>
+                            <?php
+                            $setores_unicos = fetch_setores_unicos();
+                            foreach ($setores_unicos as $setor) {
+                                echo '<option value="' . esc_attr($setor) . '">' . esc($setor) . '</option>';
+                            }
+                            ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="btnLimparFiltros">Limpar</button>
+                    <button type="button" class="btn btn-primary" id="btnAplicarFiltros" data-bs-dismiss="modal">Aplicar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Tabela de Inventário -->
     <div class="dashboard-section">
@@ -2119,6 +2172,9 @@ $dashboard_stats = fetch_dashboard_stats();
     const input = document.getElementById('search');
     const filtroModelo = document.getElementById('filtro_modelo');
     const filtroStatus = document.getElementById('filtro_status');
+    const filtroSetor = document.getElementById('filtro_setor');
+    const btnAplicarFiltros = document.getElementById('btnAplicarFiltros');
+    const btnLimparFiltros = document.getElementById('btnLimparFiltros');
     const table = document.getElementById('grid');
     const rows = Array.from(table.tBodies[0].rows);
 
@@ -2128,23 +2184,43 @@ $dashboard_stats = fetch_dashboard_stats();
         const q = normalizar(input.value);
         const modeloSelecionado = normalizar(filtroModelo.value);
         const statusSelecionado = normalizar(filtroStatus.value);
+        const setorSelecionado = normalizar(filtroSetor.value);
         
         rows.forEach(tr => {
             const text = normalizar(tr.innerText);
             const modelo = normalizar(tr.cells[2].innerText); // Coluna do modelo é a 3ª (índice 2)
             const status = normalizar(tr.cells[5].innerText); // Coluna de status é a 6ª (índice 5)
+            const setor = normalizar(tr.cells[8].innerText); // Coluna de setor é a 9ª (índice 8)
             
             const matchTexto = text.includes(q);
             const matchModelo = modeloSelecionado === '' || modelo === modeloSelecionado;
             const matchStatus = statusSelecionado === '' || status === statusSelecionado;
+            const matchSetor = setorSelecionado === '' || setor === setorSelecionado;
             
-            tr.style.display = (matchTexto && matchModelo && matchStatus) ? '' : 'none';
+            tr.style.display = (matchTexto && matchModelo && matchStatus && matchSetor) ? '' : 'none';
         });
     }
 
     input.addEventListener('input', aplicarFiltros);
     filtroModelo.addEventListener('change', aplicarFiltros);
     filtroStatus.addEventListener('change', aplicarFiltros);
+    if (filtroSetor) {
+        filtroSetor.addEventListener('change', aplicarFiltros);
+    }
+    if (btnAplicarFiltros) {
+        btnAplicarFiltros.addEventListener('click', aplicarFiltros);
+    }
+    if (btnLimparFiltros) {
+        btnLimparFiltros.addEventListener('click', function () {
+            input.value = '';
+            filtroModelo.value = '';
+            filtroStatus.value = '';
+            if (filtroSetor) {
+                filtroSetor.value = '';
+            }
+            aplicarFiltros();
+        });
+    }
     aplicarFiltros();
 })();
 
