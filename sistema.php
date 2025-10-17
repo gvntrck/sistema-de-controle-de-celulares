@@ -373,6 +373,19 @@ function fetch_modelos_unicos(): array {
     return $modelos ?: [];
 }
 
+function fetch_status_unicos(): array {
+    global $wpdb, $tables;
+
+    $status = $wpdb->get_col("
+        SELECT DISTINCT status
+        FROM {$tables->celulares}
+        WHERE status IS NOT NULL AND status != ''
+        ORDER BY status ASC
+    ");
+
+    return $status ?: [];
+}
+
 /**
  * Consulta principal: celulares + metadados + colaborador + metadados
  */
@@ -1533,6 +1546,15 @@ $dashboard_stats = fetch_dashboard_stats();
                 }
                 ?>
             </select>
+            <select id="filtro_status" class="form-select form-select-sm" style="max-width: 200px;">
+                <option value="">Todos os Status</option>
+                <?php
+                $status_unicos = fetch_status_unicos();
+                foreach ($status_unicos as $status) {
+                    echo '<option value="' . esc_attr($status) . '">' . esc($status) . '</option>';
+                }
+                ?>
+            </select>
             <input id="search" type="search" class="form-control form-control-sm search-input" placeholder="Pesquisar...">
             <span class="badge bg-secondary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle;">
@@ -2096,6 +2118,7 @@ $dashboard_stats = fetch_dashboard_stats();
 (function () {
     const input = document.getElementById('search');
     const filtroModelo = document.getElementById('filtro_modelo');
+    const filtroStatus = document.getElementById('filtro_status');
     const table = document.getElementById('grid');
     const rows = Array.from(table.tBodies[0].rows);
 
@@ -2104,20 +2127,25 @@ $dashboard_stats = fetch_dashboard_stats();
     function aplicarFiltros() {
         const q = normalizar(input.value);
         const modeloSelecionado = normalizar(filtroModelo.value);
+        const statusSelecionado = normalizar(filtroStatus.value);
         
         rows.forEach(tr => {
             const text = normalizar(tr.innerText);
             const modelo = normalizar(tr.cells[2].innerText); // Coluna do modelo é a 3ª (índice 2)
+            const status = normalizar(tr.cells[5].innerText); // Coluna de status é a 6ª (índice 5)
             
             const matchTexto = text.includes(q);
             const matchModelo = modeloSelecionado === '' || modelo === modeloSelecionado;
+            const matchStatus = statusSelecionado === '' || status === statusSelecionado;
             
-            tr.style.display = (matchTexto && matchModelo) ? '' : 'none';
+            tr.style.display = (matchTexto && matchModelo && matchStatus) ? '' : 'none';
         });
     }
 
     input.addEventListener('input', aplicarFiltros);
     filtroModelo.addEventListener('change', aplicarFiltros);
+    filtroStatus.addEventListener('change', aplicarFiltros);
+    aplicarFiltros();
 })();
 
 // Sistema de busca e adição de celular
