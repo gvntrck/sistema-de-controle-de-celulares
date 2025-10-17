@@ -2,7 +2,7 @@
 /**
  * Arquivo único: /celulares-admin.php
  * Localização: /sistemas/celulares/sistema.php
- * Version: 2.3.1
+ * Version: 2.3.2
  */
 
 declare(strict_types=1);
@@ -355,6 +355,22 @@ function fetch_dashboard_stats(): array {
     }
     
     return $stats;
+}
+
+/**
+ * Busca modelos únicos de celulares cadastrados
+ */
+function fetch_modelos_unicos(): array {
+    global $wpdb, $tables;
+    
+    $modelos = $wpdb->get_col("
+        SELECT DISTINCT modelo
+        FROM {$tables->celulares}
+        WHERE modelo IS NOT NULL AND modelo != ''
+        ORDER BY modelo ASC
+    ");
+    
+    return $modelos ?: [];
 }
 
 /**
@@ -1508,6 +1524,15 @@ $dashboard_stats = fetch_dashboard_stats();
                 </svg>
                 <span>Adicionar Celular</span>
             </button>
+            <select id="filtro_modelo" class="form-select form-select-sm" style="max-width: 200px;">
+                <option value="">Todos os Modelos</option>
+                <?php
+                $modelos_unicos = fetch_modelos_unicos();
+                foreach ($modelos_unicos as $modelo) {
+                    echo '<option value="' . esc_attr($modelo) . '">' . esc($modelo) . '</option>';
+                }
+                ?>
+            </select>
             <input id="search" type="search" class="form-control form-control-sm search-input" placeholder="Pesquisar...">
             <span class="badge bg-secondary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle;">
@@ -2070,18 +2095,29 @@ $dashboard_stats = fetch_dashboard_stats();
 <script>
 (function () {
     const input = document.getElementById('search');
+    const filtroModelo = document.getElementById('filtro_modelo');
     const table = document.getElementById('grid');
     const rows = Array.from(table.tBodies[0].rows);
 
     function normalizar(t) { return t.toLowerCase(); }
 
-    input.addEventListener('input', function () {
-        const q = normalizar(this.value);
+    function aplicarFiltros() {
+        const q = normalizar(input.value);
+        const modeloSelecionado = normalizar(filtroModelo.value);
+        
         rows.forEach(tr => {
             const text = normalizar(tr.innerText);
-            tr.style.display = text.includes(q) ? '' : 'none';
+            const modelo = normalizar(tr.cells[2].innerText); // Coluna do modelo é a 3ª (índice 2)
+            
+            const matchTexto = text.includes(q);
+            const matchModelo = modeloSelecionado === '' || modelo === modeloSelecionado;
+            
+            tr.style.display = (matchTexto && matchModelo) ? '' : 'none';
         });
-    });
+    }
+
+    input.addEventListener('input', aplicarFiltros);
+    filtroModelo.addEventListener('change', aplicarFiltros);
 })();
 
 // Sistema de busca e adição de celular
