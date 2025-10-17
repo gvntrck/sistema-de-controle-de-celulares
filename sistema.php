@@ -1391,42 +1391,7 @@ function handle_ajax(): void {
 ensure_schema();
 handle_ajax();
 
-// --- (Opcional) Semeadura mínima quando vazio para facilitar ---
-function seed_if_empty(): void {
-    global $wpdb, $tables;
-
-    $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$tables->celulares}");
-    if ($count > 0) { return; }
-
-    // Insere colaborador
-    $wpdb->insert($tables->colaboradores, [
-        'nome' => 'Joao', 'sobrenome' => 'Silva', 'matricula' => 'A123'
-    ]);
-    $colabId = (int) $wpdb->insert_id;
-
-    // Metas do colaborador
-    $wpdb->insert($tables->colaboradores_meta, [
-        'colaborador_id' => $colabId, 'meta_key' => 'setor', 'meta_value' => 'Operacoes'
-    ]);
-    $wpdb->insert($tables->colaboradores_meta, [
-        'colaborador_id' => $colabId, 'meta_key' => 'local', 'meta_value' => 'Sao Paulo'
-    ]);
-
-    // Insere celular
-    $wpdb->insert($tables->celulares, [
-        'marca' => 'Samsung', 'modelo' => 'A54', 'colaborador' => $colabId, 'status' => 'emprestado'
-    ]);
-    $celId = (int) $wpdb->insert_id;
-
-    // Metas do celular
-    $wpdb->insert($tables->celulares_meta, [
-        'celular_id' => $celId, 'meta_key' => 'imei', 'meta_value' => '359999999999999'
-    ]);
-    $wpdb->insert($tables->celulares_meta, [
-        'celular_id' => $celId, 'meta_key' => 'serial number', 'meta_value' => 'SN-XYZ-001'
-    ]);
-}
-seed_if_empty();
+// Função de seed removida - dados serão inseridos manualmente
 
 // --- Carrega dados para renderização ---
 $data = fetch_rows();
